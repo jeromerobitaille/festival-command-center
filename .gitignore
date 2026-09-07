@@ -10,3 +10,4 @@ hub/caddy/Caddyfile
 hub/headplane/config.yaml
 graphify-out/
 .DS_Store
+hub/local.env
