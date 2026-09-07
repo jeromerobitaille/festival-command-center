@@ -22,8 +22,14 @@ builds:
     ldflags: ["-s -w -H=windowsgui -X main.version={{ .Version }}"]
 
 archives:
-  - formats: [binary]                       # un binaire nu par plateforme, téléchargeable directement
+  - id: binaries
+    formats: [binary]                       # un binaire nu par plateforme (mise à jour automatique)
     name_template: "{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - id: windows-bundle                      # zip prêt à l'emploi : agent.exe + agent-tray.exe
+    ids: [agent, agent-tray]
+    formats: [zip]
+    name_template: "festival-agent_{{ .Version }}_windows"
+    files: [agent.example.toml]
 
 checksum:
   name_template: checksums.txt
@@ -42,9 +48,9 @@ release:
   name_template: "agent {{ .Version }}"
   header: |
     Binaires de l'agent. Les laptops se mettent à jour seuls (vérification signature + SHA-256).
-    Installation Windows : télécharger `agent_{{ .Version }}_windows_amd64.exe` → `agent.exe` et
-    `agent-tray_{{ .Version }}_windows_amd64.exe` → `agent-tray.exe` dans le même dossier, double-cliquer `agent-tray.exe`,
-    puis dans le menu de l'icône : « Installer le service » et « Entrer la clé de projet ».
+    **Installation Windows** : télécharger `festival-agent_{{ .Version }}_windows.zip`, l'extraire dans un dossier
+    (ex. C:\festival), double-cliquer `agent-tray.exe`, puis dans le menu de l'icône : « Entrer la clé de projet »
+    et « Installer le service (administrateur) ».
 
 changelog:
   use: git

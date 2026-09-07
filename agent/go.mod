@@ -5,6 +5,7 @@ go 1.26.6
 require (
 	fyne.io/systray v1.12.2
 	github.com/BurntSushi/toml v1.6.0
+	github.com/jchv/go-webview2 v0.0.0-20260205173254-56598839c808
 	github.com/kardianos/service v1.3.0
 	github.com/shirou/gopsutil/v4 v4.26.8
 	golang.org/x/mod v0.37.0
@@ -30,6 +31,7 @@ require (
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/hdevalence/ed25519consensus v0.2.0 // indirect
 	github.com/huin/goupnp v1.3.0 // indirect
+	github.com/jchv/go-winloader v0.0.0-20250406163304-c1995be93bd1 // indirect
 	github.com/jsimonetti/rtnetlink v1.4.1 // indirect
 	github.com/klauspost/compress v1.19.1 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect

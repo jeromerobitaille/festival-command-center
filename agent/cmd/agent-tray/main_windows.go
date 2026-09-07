@@ -46,13 +46,75 @@ type snapshot struct {
 }
 
 var (
-	mStatus, mIP, mProc, mVersion            *systray.MenuItem
+	mStatus, mIP, mProc, mMode, mVersion      *systray.MenuItem
 	mPanel, mKey, mFolder, mRestart, mInstall *systray.MenuItem
 	mQuit                                     *systray.MenuItem
 	client                                    = &http.Client{Timeout: 3 * time.Second}
+	userAgent                                 *exec.Cmd // agent lancé en mode utilisateur (sans service)
 )
 
+// findAgentExe retrouve le binaire de l'agent à côté de l'icône, quel que soit son nom (agent.exe ou
+// agent_0.4.0_windows_amd64.exe tel que téléchargé depuis la release).
+func findAgentExe() (string, error) {
+	exe, _ := os.Executable()
+	dir := filepath.Dir(exe)
+	if _, err := os.Stat(filepath.Join(dir, "agent.exe")); err == nil {
+		return filepath.Join(dir, "agent.exe"), nil
+	}
+	matches, _ := filepath.Glob(filepath.Join(dir, "agent_*_windows_*.exe"))
+	if len(matches) > 0 {
+		return matches[len(matches)-1], nil
+	}
+	return "", fmt.Errorf("agent.exe introuvable dans %s\n\nPlacez agent.exe (ou agent_<version>_windows_amd64.exe) dans le même dossier que agent-tray.exe.", dir)
+}
+
+func configPath() string {
+	exe, _ := os.Executable()
+	return filepath.Join(filepath.Dir(exe), "agent.toml")
+}
+
+func msgBox(title, text string, flags uint32) {
+	t, _ := syscall.UTF16PtrFromString(title)
+	b, _ := syscall.UTF16PtrFromString(text)
+	windows.MessageBox(0, b, t, flags|windows.MB_SETFOREGROUND)
+}
+
+// startUserModeAgent lance `agent.exe run` dans la session courante quand aucun service ne répond.
+func startUserModeAgent() {
+	if userAgent != nil && userAgent.ProcessState == nil {
+		return
+	}
+	agent, err := findAgentExe()
+	if err != nil {
+		return
+	}
+	cmd := exec.Command(agent, "-config", configPath(), "run")
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000} // CREATE_NO_WINDOW
+	if err := cmd.Start(); err == nil {
+		userAgent = cmd
+		go cmd.Wait()
+	}
+}
+
+func stopUserModeAgent() {
+	if userAgent != nil && userAgent.Process != nil && userAgent.ProcessState == nil {
+		userAgent.Process.Kill()
+	}
+	userAgent = nil
+}
+
 func main() {
+	// agent-tray.exe --panel [#fragment] : fenêtre du panneau (processus dédié lancé par l'icône).
+	if len(os.Args) > 1 && os.Args[1] == "--panel" {
+		frag := ""
+		if len(os.Args) > 2 {
+			frag = os.Args[2]
+		}
+		if !runPanelWindow(frag) {
+			openURL(localBase + "/" + frag)
+		}
+		return
+	}
 	registerAutostart()
 	systray.Run(onReady, func() {})
 }
@@ -64,9 +126,11 @@ func onReady() {
 	mStatus = systray.AddMenuItem("Statut : …", "")
 	mIP = systray.AddMenuItem("IP privée : —", "")
 	mProc = systray.AddMenuItem("Processeur : —", "")
+	mMode = systray.AddMenuItem("Mode : …", "")
 	mStatus.Disable()
 	mIP.Disable()
 	mProc.Disable()
+	mMode.Disable()
 	systray.AddSeparator()
 	mPanel = systray.AddMenuItem("Ouvrir le panneau", "Statut détaillé, clé de projet, configuration")
 	mKey = systray.AddMenuItem("Entrer la clé de projet…", "Rattacher cet écran à un projet")
@@ -77,24 +141,28 @@ func onReady() {
 	mVersion = systray.AddMenuItem("agent-tray "+version, "")
 	mVersion.Disable()
 	systray.AddSeparator()
-	mQuit = systray.AddMenuItem("Fermer l'icône", "L'agent continue de tourner en service")
+	mQuit = systray.AddMenuItem("Fermer l'icône", "Le service, s'il est installé, continue de tourner")
+	if _, err := findAgentExe(); err != nil {
+		msgBox("Agent Festival Command Center", err.Error(), windows.MB_ICONWARNING)
+	}
 
 	go loop()
 	go func() {
 		for {
 			select {
 			case <-mPanel.ClickedCh:
-				openURL(localBase + "/")
+				openPanelWindow("")
 			case <-mKey.ClickedCh:
-				openURL(localBase + "/#key")
+				openPanelWindow("#key")
 			case <-mFolder.ClickedCh:
 				exe, _ := os.Executable()
 				exec.Command("explorer.exe", filepath.Dir(exe)).Start()
 			case <-mRestart.ClickedCh:
 				client.Post(localBase+"/api/restart", "application/json", nil)
 			case <-mInstall.ClickedCh:
-				runElevated("install")
+				go installService()
 			case <-mQuit.ClickedCh:
+				stopUserModeAgent()
 				systray.Quit()
 				return
 			}
@@ -107,14 +175,26 @@ func loop() {
 	var lastAgentVersion string
 	for {
 		snap, err := fetchStatus()
+		installed := serviceInstalled()
 		if err != nil {
 			systray.SetIcon(icoOffline)
-			mStatus.SetTitle("Statut : agent injoignable (service arrêté ?)")
+			mStatus.SetTitle("Statut : agent injoignable")
 			mIP.SetTitle("IP privée : —")
 			mProc.SetTitle("Processeur : —")
 			systray.SetTooltip("Agent Festival Command Center — arrêté")
 			mInstall.Show()
+			if installed {
+				mMode.SetTitle("Mode : service installé mais arrêté (Redémarrer l'agent)")
+			} else {
+				mMode.SetTitle("Mode : démarrage en session utilisateur…")
+				startUserModeAgent() // pas de service : on fait tourner l'agent ici pour pouvoir le configurer
+			}
 		} else {
+			if installed {
+				mMode.SetTitle("Mode : service Windows (démarre avec l'ordinateur)")
+			} else {
+				mMode.SetTitle("Mode : session utilisateur — installer le service pour démarrer avec Windows")
+			}
 			label := snap.Message
 			if snap.Name != "" {
 				label = snap.Name + " — " + label
@@ -146,7 +226,7 @@ func loop() {
 				systray.SetIcon(icoOffline)
 			}
 			systray.SetTooltip("Agent Festival Command Center — " + label)
-			if serviceInstalled() {
+			if installed {
 				mInstall.Hide()
 			} else {
 				mInstall.Show()
@@ -177,16 +257,47 @@ func serviceInstalled() bool {
 }
 
 // runElevated lance `agent.exe -config <toml> <cmd>` avec élévation UAC.
-func runElevated(cmd string) {
-	exe, _ := os.Executable()
-	dir := filepath.Dir(exe)
-	agent := filepath.Join(dir, "agent.exe")
-	args := fmt.Sprintf(`-config "%s" %s`, filepath.Join(dir, "agent.toml"), cmd)
+func runElevated(cmd string) error {
+	agent, err := findAgentExe()
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(agent)
+	args := fmt.Sprintf(`-config "%s" %s`, configPath(), cmd)
 	verb, _ := syscall.UTF16PtrFromString("runas")
 	file, _ := syscall.UTF16PtrFromString(agent)
 	params, _ := syscall.UTF16PtrFromString(args)
 	cwd, _ := syscall.UTF16PtrFromString(dir)
-	windows.ShellExecute(0, verb, file, params, cwd, windows.SW_HIDE)
+	return windows.ShellExecute(0, verb, file, params, cwd, windows.SW_HIDE)
+}
+
+// installService : arrête l'agent en mode utilisateur (le service reprendra le port), installe avec UAC,
+// puis vérifie le résultat et l'affiche.
+func installService() {
+	stopUserModeAgent()
+	time.Sleep(500 * time.Millisecond)
+	if err := runElevated("install"); err != nil {
+		msgBox("Installation du service", "Impossible de lancer l'installation :\n"+err.Error(), windows.MB_ICONERROR)
+		return
+	}
+	for i := 0; i < 20; i++ { // jusqu'à 20 s : invite UAC + démarrage du service
+		time.Sleep(time.Second)
+		if serviceInstalled() {
+			if _, err := fetchStatus(); err == nil {
+				msgBox("Installation du service", "Le service Festival Command Center est installé et démarré.\nIl se lancera désormais avec Windows.", windows.MB_ICONINFORMATION)
+				return
+			}
+		}
+	}
+	logTxt := ""
+	if b, err := os.ReadFile(filepath.Join(filepath.Dir(configPath()), "install.log")); err == nil {
+		logTxt = "\n\n" + string(b)
+	}
+	if serviceInstalled() {
+		msgBox("Installation du service", "Le service est installé mais ne répond pas encore. Essayez « Redémarrer l'agent »."+logTxt, windows.MB_ICONWARNING)
+	} else {
+		msgBox("Installation du service", "Le service n'a pas été installé (invite refusée ou erreur)."+logTxt, windows.MB_ICONWARNING)
+	}
 }
 
 func openURL(u string) { exec.Command("rundll32", "url.dll,FileProtocolHandler", u).Start() }

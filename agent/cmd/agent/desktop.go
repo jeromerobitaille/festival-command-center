@@ -19,7 +19,11 @@ func launchTray() bool {
 	}
 	tray := filepath.Join(filepath.Dir(exe), name)
 	if _, err := os.Stat(tray); err != nil {
-		return false
+		matches, _ := filepath.Glob(filepath.Join(filepath.Dir(exe), "agent-tray*"))
+		if len(matches) == 0 {
+			return false
+		}
+		tray = matches[0]
 	}
 	cmd := exec.Command(tray)
 	return cmd.Start() == nil
@@ -28,6 +32,12 @@ func launchTray() bool {
 func openBrowser(url string) error {
 	switch runtime.GOOS {
 	case "windows":
+		if exe, err := os.Executable(); err == nil {
+			tray := filepath.Join(filepath.Dir(exe), "agent-tray.exe")
+			if _, err := os.Stat(tray); err == nil {
+				return exec.Command(tray, "--panel").Start() // fenêtre native WebView2
+			}
+		}
 		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
 	case "darwin":
 		return exec.Command("open", url).Start()

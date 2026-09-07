@@ -131,12 +131,25 @@ func main() {
 			log.Fatal(err)
 		}
 	case "install":
+		installLog := filepath.Join(filepath.Dir(cfg.Path), "install.log")
+		fail := func(step string, err error) {
+			msg := fmt.Sprintf("%s %s : %v", time.Now().Format(time.RFC3339), step, err)
+			os.WriteFile(installLog, []byte(msg+"\n"), 0o644)
+			log.Fatal(msg)
+		}
+		if _, err := os.Stat(cfg.Path); err != nil {
+			// le service a besoin d'un fichier : on écrit la configuration par défaut
+			os.WriteFile(cfg.Path, []byte(localapi.DefaultTOML()), 0o644)
+		}
+		_ = service.Control(svc, "stop")
+		_ = service.Control(svc, "uninstall") // réinstallation idempotente
 		if err := service.Control(svc, "install"); err != nil {
-			log.Fatal("install : ", err)
+			fail("install", err)
 		}
 		if err := service.Control(svc, "start"); err != nil {
-			log.Fatal("start : ", err)
+			fail("start", err)
 		}
+		os.Remove(installLog)
 		fmt.Println("service installé et démarré :", serviceName)
 		fmt.Println("→ approuver maintenant l'écran dans le portail :", cfg.Portal.URL)
 	case "uninstall":

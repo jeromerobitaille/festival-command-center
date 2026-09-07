@@ -13,13 +13,15 @@ Binaire unique, installé sur chaque laptop d'écran. Il :
 
 ## Installation sur un laptop Windows
 
-1. Créer un dossier, par ex. `C:\festival\`, y mettre `agent.exe` et `agent-tray.exe` (depuis la
-   dernière release GitHub, renommés sans le suffixe de version).
+1. Télécharger `festival-agent_<version>_windows.zip` de la dernière release GitHub et l'extraire dans un
+   dossier, par ex. `C:\festival\` (il contient `agent.exe` et `agent-tray.exe`).
 2. Double-cliquer `agent-tray.exe` : une icône apparaît dans la barre des tâches (elle se relance à chaque
-   ouverture de session). Menu de l'icône :
+   ouverture de session). Tant qu'aucun service n'est installé, l'icône fait tourner l'agent elle-même dans
+   la session, ce qui permet de le configurer tout de suite. Menu de l'icône :
    - **Installer le service (administrateur)** : l'agent démarre avec Windows, avant l'ouverture de session.
-   - **Entrer la clé de projet…** : ouvre le panneau local (http://127.0.0.1:47632) où l'on colle la clé du
-     projet, l'identifiant de l'écran, l'IP du processeur, et où l'on voit/édite `agent.toml`.
+   - **Entrer la clé de projet…** : ouvre le panneau dans une fenêtre de l'application (WebView2, intégré à
+     Windows 10/11 ; sinon le navigateur) où l'on colle la clé du projet, l'identifiant de l'écran, l'IP du
+     processeur, et où l'on voit/édite `agent.toml`.
    - **Ouvrir le panneau** : statut, IP privée, dernier heartbeat, processeur.
 3. Approuver l'écran dans le portail (onglet Écrans du projet). Icône rouge = arrêté ou sans clé,
    orange = en attente / connexion / processeur injoignable, verte = en ligne.

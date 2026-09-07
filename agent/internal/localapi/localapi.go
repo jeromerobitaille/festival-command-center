@@ -53,7 +53,7 @@ func Serve(ctx context.Context, addr, cfgPath string, ctrl Controller) error {
 	mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) {
 		b, err := os.ReadFile(cfgPath)
 		if err != nil {
-			b = []byte(defaultTOML())
+			b = []byte(DefaultTOML())
 		}
 		writeJSON(w, map[string]any{"path": cfgPath, "toml": string(b)})
 	})
@@ -169,7 +169,8 @@ func (s *Server) writeConfig(content string) error {
 	return os.Rename(tmp, s.cfgPath)
 }
 
-func defaultTOML() string {
+// DefaultTOML : contenu initial de agent.toml.
+func DefaultTOML() string {
 	return `# Configuration locale de l'agent Festival Command Center.
 [portal]
 url         = "` + config.DefaultPortalURL + `"
