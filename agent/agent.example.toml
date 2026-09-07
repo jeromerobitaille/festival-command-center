@@ -1,0 +1,43 @@
+# Configuration de l'agent Festival Command Center.
+# Copier ce fichier en agent.toml à côté du binaire, puis : agent install
+
+[screen]
+id   = "ecran-01"                      # identifiant unique, devient le nom du noeud sur le réseau
+name = "Place des Festivals - Nord"    # libellé affiché dans le dashboard
+
+[hub]
+control_url = "https://hub.festival.example"        # Headscale
+auth_key    = "hskey-CHANGEZ-MOI"                    # clé de pré-auth Headscale (réutilisable)
+api_url     = "https://hub.festival.example/api"    # dashboard, pour le heartbeat (optionnel)
+api_token   = ""                                     # jeton partagé pour le heartbeat (optionnel)
+heartbeat_seconds = 15
+
+[processor]
+ip   = "192.168.0.10"   # processeur Tessera branché en direct sur le laptop
+port = 37564            # port Tessera Remote (Direct Connect)
+
+# Chaque [[forward]] écoute sur l'IP tailnet de l'agent et relaie vers une cible locale.
+[[forward]]
+name   = "tessera-remote"
+proto  = "tcp"
+listen = 37564
+target = "192.168.0.10:37564"
+
+[[forward]]
+name   = "tessera-http"
+proto  = "tcp"
+listen = 8080
+target = "192.168.0.10:80"
+
+[remote_desktop]
+provider = "rustdesk"
+id       = ""    # laissé vide : l'agent tente `rustdesk --get-id` pour le trouver
+
+[agent]
+state_dir = ""   # vide = dossier "state" à côté du fichier de config
+log_file  = ""   # vide = stdout / journal du service
+
+[update]
+enabled     = true   # mise à jour automatique depuis les releases GitHub (binaires signés)
+check_hours = 1      # fréquence de vérification
+# base_url  = "https://github.com/jeromerobitaille/festival-command-center/releases"

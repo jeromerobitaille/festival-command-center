@@ -1,0 +1,21 @@
+# Modèle rendu en config.yaml par ../setup.sh (domaine et secret remplacés).
+server:
+  host: "0.0.0.0"
+  port: 3000
+  base_url: "http://hub.localhost"     # sans le préfixe /admin
+  cookie_secret: "local-dev-cookie-secret-32chars!"      # exactement 32 caractères
+  cookie_secure: false
+  cookie_max_age: 86400
+  data_path: "/var/lib/headplane"
+
+headscale:
+  url: "http://headscale:8080"
+  public_url: "http://hub.localhost"
+  config_path: "/etc/headscale/config.yaml"   # monté en lecture seule : affichage uniquement
+  config_strict: false
+
+integration:
+  agent:
+    enabled: false
+  docker:
+    enabled: false

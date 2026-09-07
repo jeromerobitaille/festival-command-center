@@ -1,0 +1,78 @@
+# Hub Festival Command Center — un seul VPS.
+# Ports à ouvrir sur le VPS : 80/tcp 443/tcp 443/udp 3478/udp 21115-21119/tcp 21116/udp
+services:
+  caddy:
+    image: caddy:2.11-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on: [headscale, headplane, dashboard]
+
+  headscale:
+    image: headscale/headscale:v0.29.3
+    restart: unless-stopped
+    command: serve
+    ports:
+      - "3478:3478/udp"        # STUN du DERP intégré
+    volumes:
+      - ./headscale/config.yaml:/etc/headscale/config.yaml:ro
+      - headscale-data:/var/lib/headscale
+      - headscale-run:/var/run/headscale
+
+  headplane:                   # interface d'administration Headscale, servie sur hub.DOMAINE/admin
+    image: ghcr.io/tale/headplane:0.7.1
+    restart: unless-stopped
+    volumes:
+      - ./headplane/config.yaml:/etc/headplane/config.yaml:ro
+      - ./headscale/config.yaml:/etc/headscale/config.yaml:ro
+      - headplane-data:/var/lib/headplane
+
+  hbbs:                        # RustDesk : serveur d'identifiants / rendez-vous
+    image: rustdesk/rustdesk-server:1.1.16
+    restart: unless-stopped
+    command: hbbs -r ${DOMAIN}:21117
+    ports:
+      - "21115:21115"
+      - "21116:21116"
+      - "21116:21116/udp"
+      - "21118:21118"
+    volumes:
+      - rustdesk-data:/root
+
+  hbbr:                        # RustDesk : relais
+    image: rustdesk/rustdesk-server:1.1.16
+    restart: unless-stopped
+    command: hbbr
+    ports:
+      - "21117:21117"
+      - "21119:21119"
+    volumes:
+      - rustdesk-data:/root
+
+  dashboard:
+    build: ./dashboard
+    restart: unless-stopped
+    environment:
+      LISTEN: ":8090"
+      DATA_FILE: /data/state.json
+      HEARTBEAT_TOKEN: ${HEARTBEAT_TOKEN}
+      RUSTDESK_SERVER: ${DOMAIN}
+      STALE_SECONDS: "45"
+      OPERATOR_HOSTS: ${OPERATOR_HOSTS:-regie}   # noms tailnet des postes de régie, pour le compteur « relayés »
+    volumes:
+      - dashboard-data:/data
+
+volumes:
+  caddy-data:
+  caddy-config:
+  headscale-data:
+  headscale-run:
+  rustdesk-data:
+  dashboard-data:
+  headplane-data:

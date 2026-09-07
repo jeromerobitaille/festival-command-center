@@ -1,0 +1,23 @@
+name: ci
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: |
+            agent/go.sum
+            hub/dashboard/go.sum
+      - name: agent
+        working-directory: agent
+        run: go vet ./... && go build ./... && GOOS=windows GOARCH=amd64 go build ./cmd/agent
+      - name: dashboard
+        working-directory: hub/dashboard
+        run: go vet ./... && go build ./...

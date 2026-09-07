@@ -1,0 +1,29 @@
+# Surcharge pour un essai local (Mac/Linux avec Docker) :
+#   ./scripts/local-up.sh   (équivaut à : docker compose --env-file local.env -f docker-compose.yml -f docker-compose.local.yml up -d --build)
+# Pas de TLS : http://hub.localhost (Headscale + /admin), http://panel.localhost (dashboard).
+services:
+  caddy:
+    volumes:
+      - ./caddy/Caddyfile.local:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    ports: !override
+      - "80:80"
+  headscale:
+    volumes:
+      - ./headscale/config.local.yaml:/etc/headscale/config.yaml:ro
+      - headscale-data:/var/lib/headscale
+      - headscale-run:/var/run/headscale
+    ports:
+      - "3478:3478/udp"
+      - "8080:8080"          # accès direct pour les agents locaux (control_url = http://127.0.0.1:8080)
+  headplane:
+    volumes:
+      - ./headplane/config.local.yaml:/etc/headplane/config.yaml:ro
+      - ./headscale/config.local.yaml:/etc/headscale/config.yaml:ro
+      - headplane-data:/var/lib/headplane
+  dashboard:
+    environment:
+      HEARTBEAT_TOKEN: local-dev-token
+    ports:
+      - "8090:8090"          # accès direct pour les agents locaux (api_url = http://127.0.0.1:8090/api)

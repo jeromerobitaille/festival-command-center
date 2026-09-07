@@ -1,0 +1,33 @@
+# Rendu en Caddyfile par ../setup.sh
+{
+	# __ACME_EMAIL_LINE__
+}
+
+hub.__DOMAIN__ {
+	# Interface d'administration Headscale (Headplane). Connexion avec une clé API : ./scripts/new-api-key.sh
+	handle /admin* {
+		reverse_proxy headplane:3000
+	}
+
+	# Headscale (plan de contrôle) + DERP intégré. Caddy relaie les Upgrade HTTP nativement.
+	reverse_proxy headscale:8080 {
+		header_up True-Client-IP {remote_host}
+		header_up X-Real-IP {remote_host}
+	}
+}
+
+panel.__DOMAIN__ {
+	encode gzip
+
+	# Heartbeats des agents : authentifiés par jeton côté dashboard, pas de basic auth.
+	handle /api/heartbeat {
+		reverse_proxy dashboard:8090
+	}
+
+	handle {
+		basic_auth {
+			__PANEL_USER__ __PANEL_HASH__
+		}
+		reverse_proxy dashboard:8090
+	}
+}

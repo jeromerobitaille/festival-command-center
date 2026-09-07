@@ -1,0 +1,66 @@
+# Modèle rendu en config.yaml par ../setup.sh (domaine et IP publique remplacés).
+server_url: https://hub.__DOMAIN__
+listen_addr: 0.0.0.0:8080
+metrics_listen_addr: 127.0.0.1:9090
+
+noise:
+  private_key_path: /var/lib/headscale/noise_private.key
+
+prefixes:
+  v4: 100.64.0.0/10
+  v6: fd7a:115c:a1e0::/48
+  allocation: sequential
+
+derp:
+  server:
+    # DERP intégré : relais de secours + STUN, servi sur https://hub.__DOMAIN__ (via Caddy)
+    enabled: true
+    region_id: 900
+    region_code: "mtl"
+    region_name: "Festival - OVH Beauharnois"
+    verify_clients: true              # seuls les noeuds connus de Headscale peuvent relayer
+    stun_listen_addr: "0.0.0.0:3478"
+    private_key_path: /var/lib/headscale/derp_server_private.key
+    automatically_add_embedded_derp_region: true
+    ipv4: "__PUBLIC_IPV4__"
+  # Les relais publics de Tailscale restent en secours ; les clients choisissent le plus proche (le nôtre).
+  urls:
+    - https://controlplane.tailscale.com/derpmap/default
+  paths: []
+  auto_update_enabled: true
+  update_frequency: 3h
+
+disable_check_updates: true
+
+node:
+  ephemeral:
+    inactivity_timeout: 30m
+
+database:
+  type: sqlite
+  sqlite:
+    path: /var/lib/headscale/db.sqlite
+
+# TLS géré par Caddy
+tls_cert_path: ""
+tls_key_path: ""
+
+log:
+  level: info
+  format: text
+
+policy:
+  mode: file
+  path: ""
+
+dns:
+  magic_dns: true
+  base_domain: fest.internal          # ecran-01.fest.internal, regie.fest.internal, ...
+  nameservers:
+    global:
+      - 1.1.1.1
+      - 1.0.0.1
+  search_domains: []
+
+unix_socket: /var/run/headscale/headscale.sock
+unix_socket_permission: "0770"

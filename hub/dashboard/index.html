@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="10">
+<title>Écrans du festival</title>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --line:#262a33; --fg:#e6e8ec; --muted:#8b93a1;
+          --ok:#3ddc84; --warn:#ffb020; --ko:#ff5c5c; --accent:#5b9cff; }
+  * { box-sizing:border-box }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif }
+  header { display:flex; align-items:baseline; gap:24px; padding:18px 28px; border-bottom:1px solid var(--line) }
+  header h1 { font-size:18px; margin:0; letter-spacing:.2px }
+  header .meta { color:var(--muted); font-size:12px; margin-left:auto }
+  .kpis { display:flex; gap:14px; padding:18px 28px 0 }
+  .kpi { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 16px; min-width:150px }
+  .kpi b { display:block; font-size:24px; font-weight:600 }
+  .kpi span { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.6px }
+  .kpi.ko b { color:var(--ko) } .kpi.warn b { color:var(--warn) } .kpi.ok b { color:var(--ok) }
+  main { padding:18px 28px 40px }
+  table { width:100%; border-collapse:collapse; background:var(--panel); border:1px solid var(--line); border-radius:10px; overflow:hidden }
+  th, td { padding:10px 12px; text-align:left; vertical-align:top; border-bottom:1px solid var(--line) }
+  th { color:var(--muted); font-weight:500; font-size:12px; text-transform:uppercase; letter-spacing:.6px }
+  tr:last-child td { border-bottom:0 }
+  tr.offline td { opacity:.55 }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:8px; vertical-align:middle }
+  .dot.ok { background:var(--ok) } .dot.ko { background:var(--ko) } .dot.warn { background:var(--warn) }
+  .name { font-weight:600 } .id { color:var(--muted); font-size:12px }
+  code { font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; background:#0b0d11; padding:2px 6px; border-radius:5px; border:1px solid var(--line) }
+  .peer { display:block; font-size:12px; color:var(--muted) }
+  .peer b { color:var(--fg); font-weight:500 }
+  .tag { display:inline-block; font-size:11px; padding:1px 7px; border-radius:999px; border:1px solid var(--line); color:var(--muted); margin-left:6px }
+  .tag.direct { color:var(--ok); border-color:rgba(61,220,132,.35) }
+  .tag.relay { color:var(--warn); border-color:rgba(255,176,32,.35) }
+  a.btn { display:inline-block; background:var(--accent); color:#fff; text-decoration:none; padding:6px 12px; border-radius:7px; font-weight:600; font-size:13px }
+  a.btn.disabled { background:var(--line); color:var(--muted); pointer-events:none }
+  .sys { color:var(--muted); font-size:12px; white-space:nowrap }
+  .empty { padding:60px; text-align:center; color:var(--muted) }
+  .err { color:var(--ko); font-size:12px }
+</style>
+</head>
+<body>
+<header>
+  <h1>Écrans du festival</h1>
+  <div class="meta">mis à jour à {{.Now}} · rafraîchi toutes les 10 s · hors ligne après {{.StaleSeconds}} s sans nouvelles</div>
+</header>
+
+<div class="kpis">
+  <div class="kpi ok"><b>{{.Summary.Online}} / {{.Summary.Total}}</b><span>écrans en ligne</span></div>
+  <div class="kpi {{if .Summary.ProcessorKO}}ko{{end}}"><b>{{.Summary.ProcessorKO}}</b><span>processeurs injoignables</span></div>
+  <div class="kpi {{if .Summary.Relayed}}warn{{end}}"><b>{{.Summary.Relayed}}</b><span>écrans relayés (DERP)</span></div>
+</div>
+
+<main>
+{{if not .Screens}}
+  <div class="empty">Aucun heartbeat reçu pour l'instant. Installe l'agent sur un laptop et vérifie <code>hub.api_url</code> / <code>hub.api_token</code>.</div>
+{{else}}
+<table>
+  <thead><tr>
+    <th>Écran</th><th>Processeur Tessera</th><th>Chemin réseau</th><th>Laptop</th><th>Actions</th>
+  </tr></thead>
+  <tbody>
+  {{range .Screens}}
+  <tr class="{{if not .Online}}offline{{end}}">
+    <td>
+      <span class="dot {{if .Online}}ok{{else}}ko{{end}}"></span><span class="name">{{.ScreenName}}</span>
+      <div class="id">{{.ScreenID}} · {{if .Online}}vu il y a {{age .AgeSeconds}}{{else}}HORS LIGNE depuis {{age .AgeSeconds}}{{end}} · agent {{.AgentVersion}}</div>
+      {{if .TailnetIP}}<div class="id">tailnet <code>{{.TailnetIP}}</code></div>{{end}}
+    </td>
+    <td>
+      {{if .Processor}}
+        {{if .Processor.Reachable}}<span class="dot ok"></span>OK · {{ms .Processor.RTTMS}} ms
+        {{else}}<span class="dot ko"></span>injoignable<div class="err">{{.Processor.Error}}</div>{{end}}
+        {{if .TesseraURL}}<div class="id">Direct Connect : <code>{{.TesseraURL}}</code></div>{{end}}
+      {{else}}<span class="id">non configuré</span>{{end}}
+      {{range .Forwards}}{{if .LastError}}<div class="err">{{.Name}} : {{.LastError}}</div>{{end}}{{end}}
+    </td>
+    <td>
+      {{if .Peers}}{{range .Peers}}{{if .Online}}
+        <span class="peer"><b>{{.Hostname}}</b>
+          {{if .PingError}}<span class="tag">?</span>
+          {{else if .Direct}}<span class="tag direct">direct</span> {{ms .LatencyMS}} ms
+          {{else}}<span class="tag relay">relais {{.Relay}}</span> {{ms .LatencyMS}} ms{{end}}
+        </span>
+      {{end}}{{end}}{{else}}<span class="id">aucun pair en ligne</span>{{end}}
+    </td>
+    <td class="sys">
+      {{if .System}}{{.System.Hostname}} · {{.System.OS}}<br>CPU {{pct .System.CPUPercent}} % · RAM {{pct .System.MemPercent}} %<br>allumé depuis {{uptime .System.UptimeSeconds}}{{end}}
+    </td>
+    <td>
+      {{if .RustDeskURL}}<a class="btn" href="{{.RustDeskURL}}">Bureau à distance</a>
+        <div class="id">RustDesk <code>{{.RemoteDesktop.ID}}</code></div>
+      {{else}}<a class="btn disabled">Bureau à distance</a><div class="id">RustDesk non détecté</div>{{end}}
+    </td>
+  </tr>
+  {{end}}
+  </tbody>
+</table>
+{{if .RustDeskServer}}<p class="id">Client RustDesk de l'opérateur : ID server <code>{{.RustDeskServer}}</code>, relay <code>{{.RustDeskServer}}</code>, clé via <code>scripts/rustdesk-key.sh</code>.</p>{{end}}
+{{end}}
+</main>
+</body>
+</html>

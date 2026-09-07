@@ -1,0 +1,42 @@
+# Build des binaires de l'agent à chaque tag v* (voir .github/workflows/release.yml).
+version: 2
+project_name: agent
+
+builds:
+  - main: ./cmd/agent
+    binary: agent
+    env: [CGO_ENABLED=0]
+    goos: [windows, linux, darwin]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags: ["-s -w -X main.version={{ .Version }}"]
+
+archives:
+  - formats: [binary]                       # un binaire nu par plateforme, téléchargeable directement
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+signs:
+  - id: checksums
+    artifacts: checksum
+    cmd: go
+    args: ["run", "./cmd/relsign", "sign", "-key-env", "RELEASE_SIGNING_KEY", "-o", "${signature}", "${artifact}"]
+    signature: "${artifact}.sig"
+
+release:
+  github:
+    owner: jeromerobitaille
+    name: festival-command-center
+  name_template: "agent {{ .Version }}"
+  header: |
+    Binaires de l'agent. Les laptops se mettent à jour seuls (vérification signature + SHA-256).
+    Installation manuelle : télécharger `agent_{{ .Version }}_windows_amd64.exe`, le renommer `agent.exe`, puis `agent.exe install`.
+
+changelog:
+  use: git
+  filters:
+    exclude: ["^docs", "^chore", "^ci"]
