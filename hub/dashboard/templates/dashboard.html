@@ -1,0 +1,15 @@
+{{template "head" .}}
+<div class="page-head">
+  <h1>{{.Project.Name}}</h1>
+  <div class="actions-bar">
+    <span id="pending-banner" class="pill warn" hidden></span>
+    {{if .User.IsAdmin}}
+    <button class="btn" id="btn-edit" onclick="Dash.toggleEdit()">Modifier</button>
+    <button class="btn" id="btn-add" onclick="Dash.addWidget()" hidden>Ajouter un widget</button>
+    <button class="btn primary" id="btn-save" onclick="Dash.save()" hidden>Enregistrer</button>
+    {{end}}
+  </div>
+</div>
+<div class="grid-stack" id="grid"></div>
+<div id="dash-empty" class="empty" hidden>Tableau de bord vide.{{if .User.IsAdmin}} Cliquez sur « Modifier » puis « Ajouter un widget ».{{end}}</div>
+{{template "foot" .}}

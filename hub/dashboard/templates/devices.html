@@ -1,0 +1,12 @@
+{{template "head" .}}
+<div class="page-head"><h1>Écrans</h1><span class="muted small" id="dev-refresh"></span></div>
+<section id="pending-section" hidden>
+  <h2>En attente d'approbation</h2>
+  <p class="muted small">Un agent s'est connecté avec la clé de ce projet. Vérifiez l'identifiant et le nom d'hôte avant d'accepter : l'écran rejoindra alors le réseau privé.</p>
+  <div id="pending-list" class="cards"></div>
+</section>
+<section>
+  <h2>Écrans du projet</h2>
+  <div id="device-list"></div>
+</section>
+{{template "foot" .}}

@@ -50,41 +50,33 @@ C'est exactement le port-forwarding demandé, et c'est plus prévisible qu'un su
 - **Hub** : Docker Compose sur **un seul VPS OVH (Beauharnois)** : Caddy (TLS), Headscale avec son
   **DERP intégré** (relais + STUN, `verify_clients`), RustDesk hbbs/hbbr, dashboard. Pas de Postgres :
   SQLite pour Headscale, un fichier JSON pour le dashboard. Voir `hub/README.md`.
-- **Dashboard** : Go, page HTML rafraîchie toutes les 10 s. Écrans en ligne/hors ligne, état du processeur,
-  chemin direct ou relayé vers la régie avec latence, CPU/RAM/uptime, bouton `rustdesk://connection/new/<id>`,
-  adresse Direct Connect Tessera. API JSON sur `/api/screens`.
+- **Portail** (Go + SQLite, `hub/dashboard`) : comptes `admin`/`user`, projets multi-tenant avec clé
+  d'inscription, approbation des écrans, configuration des agents **à distance** (forwards, processeur,
+  mises à jour) appliquée à chaud, tableaux de bord en grille de widgets, actions HTTP (hub ou agent),
+  automatisations cron. Le portail crée lui-même les clés Headscale via l'API à l'approbation.
 
-## Fichier de config cible
+## Cycle de vie d'un écran
+
+1. `agent.toml` local : URL du portail + clé du projet + identifiant de l'écran.
+2. L'agent s'inscrit (`/api/agent/enroll`), reçoit un jeton d'appareil et attend (`/api/agent/status`).
+3. Un admin approuve dans le portail → clé Headscale à usage unique livrée à l'agent → tsnet rejoint le réseau.
+4. L'agent charge sa configuration (`/api/agent/config`), démarre les forwards, envoie ses heartbeats ;
+   la réponse du heartbeat porte la version de config et les commandes à exécuter (http_request, probe,
+   restart, update). Un changement dans le portail est appliqué au heartbeat suivant.
+
+## Fichier de config local (minimal)
 
 ```toml
+[portal]
+url         = "https://panel.veam.ca"
+project_key = "fcc_..."          # Configuration du projet dans le portail
+
 [screen]
-id       = "ecran-03"
-name     = "Place des Festivals — Nord"
+id   = "ecran-03"
+name = "Place des Festivals — Nord"
 
-[hub]
-control_url = "https://hub.festival.example"   # Headscale
-auth_key    = "hskey-..."                        # pré-auth, réutilisable
-api_url     = "https://hub.festival.example/api" # heartbeat
-
-[processor]
-ip = "192.168.0.10"          # Tessera branché en direct
-
-[[forward]]
-name   = "tessera-remote"
-proto  = "tcp"
-listen = 37564
-target = "192.168.0.10:37564"
-
-[[forward]]
-name   = "tessera-http"
-proto  = "tcp"
-listen = 8080
-target = "192.168.0.10:80"
-
-[remote_desktop]
-provider = "rustdesk"
-server   = "hub.festival.example"
-key      = "..."               # clé publique du hbbs
+[processor]                       # proposition initiale, ensuite gérée dans le portail
+ip = "192.168.0.10"
 ```
 
 ## Topologie

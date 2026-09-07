@@ -1,0 +1,16 @@
+{{template "head" .}}
+<div class="page-head"><h1>Projets</h1>{{if .User.IsAdmin}}<button class="btn primary" onclick="App.newProject()">Nouveau projet</button>{{end}}</div>
+{{if not .Projects}}<div class="empty">Aucun projet{{if .User.IsAdmin}} : créez le premier{{else}} ne vous a encore été attribué{{end}}.</div>{{end}}
+<div class="cards">
+{{range .Projects}}
+  <a class="card project" href="/p/{{.Slug}}">
+    <h2>{{.Name}}</h2>
+    <div class="stats">
+      <span><b>{{.Online}}</b>/{{.Devices}} écrans en ligne</span>
+      {{if .Pending}}<span class="pill warn">{{.Pending}} en attente d'approbation</span>{{end}}
+    </div>
+    <div class="muted small">{{.Timezone}}</div>
+  </a>
+{{end}}
+</div>
+{{template "foot" .}}

@@ -60,11 +60,14 @@ services:
     restart: unless-stopped
     environment:
       LISTEN: ":8090"
-      DATA_FILE: /data/state.json
-      HEARTBEAT_TOKEN: ${HEARTBEAT_TOKEN}
-      RUSTDESK_SERVER: ${DOMAIN}
+      DATA_DIR: /data
       STALE_SECONDS: "45"
-      OPERATOR_HOSTS: ${OPERATOR_HOSTS:-regie}   # noms tailnet des postes de régie, pour le compteur « relayés »
+      HEADSCALE_URL: http://headscale:8080
+      HEADSCALE_PUBLIC_URL: https://hub.${DOMAIN}
+      HEADSCALE_API_KEY: ${HEADSCALE_API_KEY:-}     # ./scripts/portal-headscale-key.sh
+      HEADSCALE_USER: festival
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}          # premier démarrage seulement ; vide = généré et affiché dans les logs
     volumes:
       - dashboard-data:/data
 

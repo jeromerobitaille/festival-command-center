@@ -2,10 +2,13 @@
 
 Binaire unique, installé sur chaque laptop d'écran. Il :
 
-- rejoint le réseau WireGuard du festival via **tsnet** (plan de contrôle Headscale sur le hub) ;
-- relaie les ports configurés de son IP tailnet vers le processeur Tessera (TCP et UDP) ;
-- sonde le processeur et remonte un **heartbeat** au hub : état, forwards, latence et type de chemin
-  (direct ou relais DERP) vers chaque pair, CPU/RAM/uptime, identifiant RustDesk ;
+- s'inscrit auprès du **portail** avec la clé du projet et attend qu'un administrateur l'approuve ;
+- reçoit alors sa clé Headscale et rejoint le réseau WireGuard via **tsnet** (aucun logiciel tiers) ;
+- applique la configuration du portail (nom, processeur, forwards TCP/UDP, mises à jour) et la recharge
+  à chaud quand elle change ;
+- sonde le processeur et remonte un **heartbeat** : état, forwards, chemin (direct ou relais DERP) et
+  latence vers chaque pair, CPU/RAM/uptime, identifiant RustDesk ;
+- exécute les commandes envoyées depuis le portail (requête HTTP locale, sonde, redémarrage, mise à jour) ;
 - s'installe comme service système (Windows, macOS, Linux) et redémarre seul en cas de perte réseau.
 
 ## Installation sur un laptop

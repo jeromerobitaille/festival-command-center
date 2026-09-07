@@ -1,0 +1,5 @@
+{{template "head" .}}
+<div class="page-head"><h1>Actions</h1>{{if .User.IsAdmin}}<button class="btn primary" onclick="Actions.edit()">Nouvelle action</button>{{end}}</div>
+<p class="muted small">Une action est une requête HTTP. Exécutée par le hub pour une API externe, ou par l'agent d'un écran pour joindre un appareil sur son réseau local (par exemple l'API HTTP du Tessera). Les actions servent aux boutons du tableau de bord et aux automatisations.</p>
+<div id="action-list"></div>
+{{template "foot" .}}

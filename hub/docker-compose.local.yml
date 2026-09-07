@@ -24,6 +24,7 @@ services:
       - headplane-data:/var/lib/headplane
   dashboard:
     environment:
-      HEARTBEAT_TOKEN: local-dev-token
+      HEADSCALE_PUBLIC_URL: http://127.0.0.1:8080   # les agents locaux joignent Headscale en direct
+      ADMIN_PASSWORD: admin-local
     ports:
       - "8090:8090"          # accès direct pour les agents locaux (api_url = http://127.0.0.1:8090/api)

@@ -9,7 +9,7 @@ Tout le côté serveur, sur **un seul VPS** (OVH VPS-2 à Beauharnois suffit), e
 | `caddy` | TLS Let's Encrypt et reverse proxy | 80, 443 (tcp+udp) |
 | `headscale` | plan de contrôle du réseau WireGuard **et** relais DERP intégré avec STUN | via `hub.DOMAINE`, 3478/udp |
 | `hbbs` / `hbbr` | serveur d'identifiants et relais RustDesk | 21115-21119/tcp, 21116/udp |
-| `dashboard` | reçoit les heartbeats des agents, page d'état, bouton bureau à distance | via `panel.DOMAINE` |
+| `dashboard` | le **portail** : comptes et rôles, projets, approbation et configuration à distance des écrans, tableaux de bord, actions HTTP, automatisations | via `panel.DOMAINE` |
 | `headplane` | interface d'administration Headscale (noeuds, utilisateurs, clés, ACL) | via `hub.DOMAINE/admin` |
 
 Le DERP intégré de Headscale est déclaré région 900 « mtl ». Les relais publics de Tailscale restent en
@@ -51,10 +51,27 @@ enregistrés dans Headscale peuvent utiliser le relais (`verify_clients`).
    mot de passe permanent. Le bouton « Bureau à distance » du dashboard ouvre `rustdesk://connection/new/<id>`
    dans le client RustDesk de l'opérateur.
 
+## Portail
+
+- **Comptes** : le premier `admin` est créé au premier démarrage (mot de passe `ADMIN_PASSWORD` du `.env`,
+  sinon généré et affiché dans `docker compose logs dashboard`). Deux rôles : `admin` (tout) et `user`
+  (voit les projets dont il est membre, lance les actions, ne modifie rien). Gestion dans *Utilisateurs*.
+- **Projets** : chaque projet a sa **clé** (onglet *Configuration*), à mettre dans le `agent.toml` des
+  laptops. Les membres non-admin y sont cochés au même endroit.
+- **Écrans** : un agent qui se connecte avec la clé apparaît *en attente*. À l'approbation, le portail
+  crée une clé Headscale via l'API (d'où `./scripts/portal-headscale-key.sh`) et l'agent rejoint le réseau.
+  La configuration de chaque écran (nom, processeur, forwards, mises à jour) se modifie dans le portail et
+  l'agent l'applique au prochain heartbeat. Boutons : sonder, redémarrer, mettre à jour, révoquer.
+- **Actions** : requêtes HTTP exécutées par le hub (API externe) ou par l'agent d'un écran (réseau local,
+  ex. l'API HTTP du Tessera). **Automatisations** : horaire cron dans le fuseau du projet → action.
+- **Tableau de bord** : grille de widgets par projet (statut des écrans, détail d'un écran, bouton
+  d'action, automatisations, note), déplaçables et redimensionnables en mode *Modifier*.
+- Données : SQLite dans le volume `dashboard-data` (`portal.sqlite`). À sauvegarder avec les autres volumes.
+
 ## Agents
 
-Dans `agent.toml` de chaque laptop, la section `[hub]` reçoit les valeurs affichées à la fin de `./setup.sh` :
-`control_url`, `api_url`, `api_token`, plus la clé de pré-auth dans `auth_key`.
+Dans `agent.toml` de chaque laptop : `[portal] url = "https://panel.DOMAINE"` et `project_key` copiée
+depuis la Configuration du projet. Voir `agent/README.md`.
 
 ## Essai en local (sans VPS)
 
@@ -62,8 +79,9 @@ Avec Docker sur un poste de travail :
 
 ```
 ./scripts/local-up.sh          # pile complète en HTTP : http://hub.localhost, /admin, http://panel.localhost
-./scripts/new-preauth-key.sh   # puis un agent.toml avec control_url = "http://127.0.0.1:8080",
-                               # api_url = "http://127.0.0.1:8090/api", api_token = "local-dev-token"
+# portail : http://panel.localhost, admin / admin-local ; donner au portail une clé API Headscale :
+COMPOSE_ARGS="--env-file local.env -f docker-compose.yml -f docker-compose.local.yml" ./scripts/portal-headscale-key.sh
+# puis un agent.toml avec [portal] url = "http://127.0.0.1:8090" et la clé du projet créé dans le portail
 ./scripts/local-down.sh -v     # arrêt et nettoyage
 ```
 

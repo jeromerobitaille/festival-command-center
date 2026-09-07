@@ -18,16 +18,8 @@ hub.__DOMAIN__ {
 
 panel.__DOMAIN__ {
 	encode gzip
-
-	# Heartbeats des agents : authentifiés par jeton côté dashboard, pas de basic auth.
-	handle /api/heartbeat {
-		reverse_proxy dashboard:8090
-	}
-
-	handle {
-		basic_auth {
-			__PANEL_USER__ __PANEL_HASH__
-		}
-		reverse_proxy dashboard:8090
+	# Le portail gère lui-même les sessions (login) et les jetons des agents (/api/agent/*).
+	reverse_proxy dashboard:8090 {
+		header_up X-Forwarded-Proto https
 	}
 }

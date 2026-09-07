@@ -1,0 +1,40 @@
+{{define "head"}}<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · Festival Command Center</title>
+<link rel="stylesheet" href="/static/app.css">
+{{if eq .Page "dashboard"}}<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/gridstack.js/13.2.0/gridstack.min.css">{{end}}
+</head>
+<body data-page="{{.Page}}">
+<header class="top">
+  <a class="brand" href="/">Festival Command Center</a>
+  {{if .Project}}
+  <nav class="tabs">
+    <a href="/p/{{.Project.Slug}}" class="{{if eq .Page "dashboard"}}on{{end}}">Tableau de bord</a>
+    <a href="/p/{{.Project.Slug}}/devices" class="{{if eq .Page "devices"}}on{{end}}">Écrans</a>
+    <a href="/p/{{.Project.Slug}}/actions" class="{{if eq .Page "actions"}}on{{end}}">Actions</a>
+    <a href="/p/{{.Project.Slug}}/automations" class="{{if eq .Page "automations"}}on{{end}}">Automatisations</a>
+    {{if .User.IsAdmin}}<a href="/p/{{.Project.Slug}}/settings" class="{{if eq .Page "settings"}}on{{end}}">Configuration</a>{{end}}
+  </nav>
+  {{end}}
+  <div class="me">
+    {{if .User.IsAdmin}}<a href="/admin/users">Utilisateurs</a>{{end}}
+    <button class="link" onclick="App.changePassword()">{{.User.Username}}</button>
+    <form method="post" action="/logout" class="inline"><button class="link">Quitter</button></form>
+  </div>
+</header>
+<main>
+{{end}}
+
+{{define "foot"}}
+</main>
+<div id="toast" class="toast" hidden></div>
+<div id="modal" class="modal" hidden><div class="modal-box"><div id="modal-body"></div></div></div>
+<script>window.PROJECT = {{if .Project}}{{json .Project}}{{else}}null{{end}}; window.ME = {{json .User}};</script>
+{{if eq .Page "dashboard"}}<script src="https://cdnjs.cloudflare.com/ajax/libs/gridstack.js/13.2.0/gridstack-all.min.js"></script>{{end}}
+<script src="/static/app.js"></script>
+</body>
+</html>
+{{end}}

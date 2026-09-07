@@ -1,4 +1,4 @@
-// Package config charge et valide agent.toml.
+// Package config charge et valide agent.toml (configuration locale minimale ; le reste vient du portail).
 package config
 
 import (
@@ -12,16 +12,19 @@ import (
 )
 
 type Config struct {
-	Screen        Screen        `toml:"screen"`
-	Hub           Hub           `toml:"hub"`
-	Processor     Processor     `toml:"processor"`
-	Forwards      []Forward     `toml:"forward"`
-	RemoteDesktop RemoteDesktop `toml:"remote_desktop"`
-	Agent         Agent         `toml:"agent"`
-	Update        Update        `toml:"update"`
+	Portal    Portal    `toml:"portal"`
+	Screen    Screen    `toml:"screen"`
+	Processor Processor `toml:"processor"`
+	Forwards  []Forward `toml:"forward"`
+	Agent     Agent     `toml:"agent"`
+	Update    Update    `toml:"update"`
 
-	// Path est le chemin absolu du fichier chargé (non sérialisé).
 	Path string `toml:"-"`
+}
+
+type Portal struct {
+	URL        string `toml:"url"`
+	ProjectKey string `toml:"project_key"`
 }
 
 type Screen struct {
@@ -29,14 +32,8 @@ type Screen struct {
 	Name string `toml:"name"`
 }
 
-type Hub struct {
-	ControlURL       string `toml:"control_url"`
-	AuthKey          string `toml:"auth_key"`
-	APIURL           string `toml:"api_url"`
-	APIToken         string `toml:"api_token"`
-	HeartbeatSeconds int    `toml:"heartbeat_seconds"`
-}
-
+// Processor et Forward sont la proposition initiale envoyée au portail à l'inscription.
+// Après approbation, la configuration du portail fait foi.
 type Processor struct {
 	IP   string `toml:"ip"`
 	Port int    `toml:"port"`
@@ -49,25 +46,15 @@ type Forward struct {
 	Target string `toml:"target"`
 }
 
-type RemoteDesktop struct {
-	Provider string `toml:"provider"`
-	ID       string `toml:"id"`
-}
-
 type Agent struct {
 	StateDir string `toml:"state_dir"`
 	LogFile  string `toml:"log_file"`
 }
 
 type Update struct {
-	Enabled    *bool  `toml:"enabled"`     // défaut : true
-	BaseURL    string `toml:"base_url"`    // défaut : releases GitHub du projet
-	CheckHours int    `toml:"check_hours"` // défaut : 1
+	BaseURL string `toml:"base_url"` // remplace l'URL des releases GitHub (tests)
 }
 
-func (u Update) IsEnabled() bool { return u.Enabled == nil || *u.Enabled }
-
-// DefaultPath retourne agent.toml à côté de l'exécutable.
 func DefaultPath() string {
 	exe, err := os.Executable()
 	if err != nil {
@@ -91,7 +78,7 @@ func Load(path string) (*Config, error) {
 		for _, k := range undecoded {
 			keys = append(keys, k.String())
 		}
-		return nil, fmt.Errorf("clés inconnues dans %s : %s", abs, strings.Join(keys, ", "))
+		return nil, fmt.Errorf("clés inconnues dans %s : %s (l'ancienne section [hub] est remplacée par [portal])", abs, strings.Join(keys, ", "))
 	}
 	c.Path = abs
 	c.applyDefaults()
@@ -102,17 +89,17 @@ func Load(path string) (*Config, error) {
 }
 
 func (c *Config) applyDefaults() {
-	if c.Hub.HeartbeatSeconds <= 0 {
-		c.Hub.HeartbeatSeconds = 15
+	c.Portal.URL = strings.TrimRight(strings.TrimSpace(c.Portal.URL), "/")
+	if c.Screen.ID == "" {
+		h, _ := os.Hostname()
+		c.Screen.ID = h
+	}
+	c.Screen.ID = Slugify(c.Screen.ID)
+	if c.Screen.Name == "" {
+		c.Screen.Name = c.Screen.ID
 	}
 	if c.Processor.Port == 0 {
 		c.Processor.Port = 37564
-	}
-	if c.Update.CheckHours <= 0 {
-		c.Update.CheckHours = 1
-	}
-	if c.RemoteDesktop.Provider == "" {
-		c.RemoteDesktop.Provider = "rustdesk"
 	}
 	if c.Agent.StateDir == "" {
 		c.Agent.StateDir = filepath.Join(filepath.Dir(c.Path), "state")
@@ -123,28 +110,32 @@ func (c *Config) applyDefaults() {
 		}
 		c.Forwards[i].Proto = strings.ToLower(c.Forwards[i].Proto)
 	}
+	// Forward par défaut vers le processeur si rien n'est déclaré.
+	if len(c.Forwards) == 0 && c.Processor.IP != "" {
+		c.Forwards = []Forward{{Name: "tessera-remote", Proto: "tcp", Listen: c.Processor.Port, Target: net.JoinHostPort(c.Processor.IP, fmt.Sprint(c.Processor.Port))}}
+	}
 }
 
 func (c *Config) validate() error {
+	if c.Portal.URL == "" || !strings.HasPrefix(c.Portal.URL, "http") {
+		return fmt.Errorf("portal.url est requis (ex. https://panel.veam.ca)")
+	}
+	if c.Portal.ProjectKey == "" {
+		return fmt.Errorf("portal.project_key est requis (Configuration du projet dans le portail)")
+	}
 	if c.Screen.ID == "" {
 		return fmt.Errorf("screen.id est requis")
-	}
-	for _, r := range c.Screen.ID {
-		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') {
-			return fmt.Errorf("screen.id doit contenir uniquement a-z, 0-9 et '-' (reçu %q)", c.Screen.ID)
-		}
-	}
-	if c.Hub.ControlURL == "" {
-		return fmt.Errorf("hub.control_url est requis")
-	}
-	if c.Hub.AuthKey == "" {
-		return fmt.Errorf("hub.auth_key est requis")
 	}
 	if c.Processor.IP != "" && net.ParseIP(c.Processor.IP) == nil {
 		return fmt.Errorf("processor.ip invalide : %q", c.Processor.IP)
 	}
+	return ValidateForwards(c.Forwards)
+}
+
+// ValidateForwards sert aussi pour la configuration reçue du portail.
+func ValidateForwards(fw []Forward) error {
 	seen := map[string]bool{}
-	for i, f := range c.Forwards {
+	for i, f := range fw {
 		if f.Name == "" {
 			return fmt.Errorf("forward[%d] : name est requis", i)
 		}
@@ -164,4 +155,23 @@ func (c *Config) validate() error {
 		seen[key] = true
 	}
 	return nil
+}
+
+// Slugify : identifiant sûr pour un nom de noeud (a-z, 0-9, '-').
+func Slugify(s string) string {
+	var b strings.Builder
+	last := '-'
+	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			last = r
+		default:
+			if last != '-' {
+				b.WriteRune('-')
+				last = '-'
+			}
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }
