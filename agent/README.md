@@ -13,7 +13,7 @@ Binaire unique, installé sur chaque laptop d'écran. Il :
 
 ## Installation sur un laptop Windows
 
-1. Télécharger `festival-agent_<version>_windows.zip` de la dernière release GitHub et l'extraire dans un
+1. Télécharger `festival-agent_<version>_windows_amd64.zip` de la dernière release GitHub et l'extraire dans un
    dossier, par ex. `C:\festival\` (il contient `agent.exe` et `agent-tray.exe`).
 2. Double-cliquer `agent-tray.exe` : une icône apparaît dans la barre des tâches (elle se relance à chaque
    ouverture de session). Tant qu'aucun service n'est installé, l'icône fait tourner l'agent elle-même dans
