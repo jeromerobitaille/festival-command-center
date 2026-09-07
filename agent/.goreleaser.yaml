@@ -3,7 +3,8 @@ version: 2
 project_name: agent
 
 builds:
-  - main: ./cmd/agent
+  - id: agent
+    main: ./cmd/agent
     binary: agent
     env: [CGO_ENABLED=0]
     goos: [windows, linux, darwin]
@@ -12,10 +13,17 @@ builds:
       - goos: windows
         goarch: arm64
     ldflags: ["-s -w -X main.version={{ .Version }}"]
+  - id: agent-tray                          # icône de la barre des tâches, Windows seulement, sans console
+    main: ./cmd/agent-tray
+    binary: agent-tray
+    env: [CGO_ENABLED=0]
+    goos: [windows]
+    goarch: [amd64]
+    ldflags: ["-s -w -H=windowsgui -X main.version={{ .Version }}"]
 
 archives:
   - formats: [binary]                       # un binaire nu par plateforme, téléchargeable directement
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    name_template: "{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:
   name_template: checksums.txt
@@ -34,7 +42,9 @@ release:
   name_template: "agent {{ .Version }}"
   header: |
     Binaires de l'agent. Les laptops se mettent à jour seuls (vérification signature + SHA-256).
-    Installation manuelle : télécharger `agent_{{ .Version }}_windows_amd64.exe`, le renommer `agent.exe`, puis `agent.exe install`.
+    Installation Windows : télécharger `agent_{{ .Version }}_windows_amd64.exe` → `agent.exe` et
+    `agent-tray_{{ .Version }}_windows_amd64.exe` → `agent-tray.exe` dans le même dossier, double-cliquer `agent-tray.exe`,
+    puis dans le menu de l'icône : « Installer le service » et « Entrer la clé de projet ».
 
 changelog:
   use: git

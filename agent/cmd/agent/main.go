@@ -25,8 +25,10 @@ import (
 	"github.com/festival/command-center/agent/internal/config"
 	"github.com/festival/command-center/agent/internal/forward"
 	"github.com/festival/command-center/agent/internal/heartbeat"
+	"github.com/festival/command-center/agent/internal/localapi"
 	"github.com/festival/command-center/agent/internal/portal"
 	"github.com/festival/command-center/agent/internal/probe"
+	"github.com/festival/command-center/agent/internal/status"
 	"github.com/festival/command-center/agent/internal/sysinfo"
 	"github.com/festival/command-center/agent/internal/tunnel"
 	"github.com/festival/command-center/agent/internal/update"
@@ -50,7 +52,10 @@ Commandes :
   probe <ip:port>  rejoint le réseau avec un noeud de diagnostic et teste une adresse du réseau privé
   update      vérifie et installe la dernière release GitHub (signée), puis redémarre le service
   reset       oublie l'inscription (jeton, réseau) : l'écran devra être ré-approuvé
+  panel       ouvre le panneau local (statut, clé de projet, configuration) dans le navigateur
   version
+
+Sans commande : lance l'icône de la barre des tâches (agent-tray) si elle est présente.
 `, version)
 }
 
@@ -61,6 +66,9 @@ func main() {
 	flag.Usage = usage
 	flag.Parse()
 	if flag.NArg() < 1 {
+		if launchTray() {
+			return
+		}
 		usage()
 		os.Exit(2)
 	}
@@ -90,9 +98,13 @@ func main() {
 		runProbe(cfg, flag.Arg(1), *verbose)
 		return
 	case "reset":
-		os.Remove(filepath.Join(cfg.Agent.StateDir, "device.json"))
-		os.RemoveAll(filepath.Join(cfg.Agent.StateDir, "tsnet"))
+		resetEnrollment(cfg)
 		fmt.Println("inscription oubliée : au prochain démarrage l'agent se réinscrira et attendra une approbation")
+		return
+	case "panel":
+		if err := openBrowser("http://" + cfg.Agent.LocalAddr + "/"); err != nil {
+			log.Fatal(err)
+		}
 		return
 	}
 
@@ -242,17 +254,56 @@ type program struct {
 	verbose bool
 	cancel  context.CancelFunc
 	done    chan struct{}
+	reload  chan struct{} // demande de relecture de agent.toml
+	svc     service.Service
 }
 
 func (p *program) Start(s service.Service) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
+	p.svc = s
 	p.done = make(chan struct{})
+	p.reload = make(chan struct{}, 1)
+	go func() {
+		if err := localapi.Serve(ctx, p.cfg.Agent.LocalAddr, p.cfg.Path, p); err != nil {
+			log.Printf("[local] %v", err)
+		}
+	}()
 	go func() {
 		defer close(p.done)
 		p.loop(ctx)
 	}()
 	return nil
+}
+
+// Reload / ResetEnrollment / Restart : implémentation de localapi.Controller.
+func (p *program) Reload() {
+	select {
+	case p.reload <- struct{}{}:
+	default:
+	}
+}
+
+func (p *program) ResetEnrollment() {
+	resetEnrollment(p.cfg)
+	p.Reload()
+}
+
+func (p *program) Restart() {
+	exe, _ := os.Executable()
+	if service.Interactive() {
+		log.Printf("[local] redémarrage demandé en mode interactif : arrêt")
+		os.Exit(0)
+	}
+	if err := update.SpawnRestart(exe, p.cfg.Path); err != nil {
+		log.Printf("[local] redémarrage impossible : %v", err)
+	}
+}
+
+func resetEnrollment(cfg *config.Config) {
+	os.Remove(filepath.Join(cfg.Agent.StateDir, "device.json"))
+	os.RemoveAll(filepath.Join(cfg.Agent.StateDir, "tsnet"))
+	status.Global.Update(func(x *status.Snapshot) { x.TailnetIP, x.DeviceID = "", 0 })
 }
 
 func (p *program) Stop(s service.Service) error {
@@ -275,12 +326,35 @@ func (p *program) loop(ctx context.Context) {
 	update.CleanupOld("")
 	backoff := 2 * time.Second
 	for {
+		// Relire agent.toml à chaque cycle : le panneau local peut l'avoir modifié.
+		if cfg, err := config.Load(p.cfg.Path); err == nil {
+			p.cfg = cfg
+		} else {
+			log.Printf("[agent] %v", err)
+		}
 		start := time.Now()
-		err := runOnce(ctx, p.cfg, p.verbose)
+		runCtx, cancelRun := context.WithCancel(ctx)
+		reloaded := make(chan struct{})
+		go func() {
+			select {
+			case <-p.reload:
+				log.Printf("[agent] configuration modifiée : redémarrage du cycle")
+				cancelRun()
+			case <-reloaded:
+			}
+		}()
+		err := runOnce(runCtx, p.cfg, p.verbose)
+		close(reloaded)
+		cancelRun()
 		if ctx.Err() != nil {
 			return
 		}
-		log.Printf("[agent] arrêt inattendu : %v ; redémarrage dans %s", err, backoff)
+		if errors.Is(err, context.Canceled) {
+			backoff = time.Second
+		} else {
+			log.Printf("[agent] arrêt inattendu : %v ; redémarrage dans %s", err, backoff)
+			status.Global.SetPhase("error", err.Error())
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -311,15 +385,32 @@ type agentState struct {
 func runOnce(ctx context.Context, cfg *config.Config, verbose bool) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	status.Global.Update(func(x *status.Snapshot) {
+		x.Version, x.ScreenID, x.Name, x.PortalURL = version, cfg.Screen.ID, cfg.Screen.Name, cfg.Portal.URL
+		x.HasProjectKey, x.ConfigPath = cfg.Portal.ProjectKey != "", cfg.Path
+		x.TailnetIP, x.ProcessorOK, x.LastHeartbeat = "", nil, time.Time{}
+	})
+
+	// 0. Sans clé de projet, on attend qu'elle soit saisie (panneau local ou agent.toml).
+	if cfg.Portal.ProjectKey == "" {
+		if _, err := portal.LoadState(cfg.Agent.StateDir); err != nil {
+			status.Global.SetPhase("no-key", "Aucune clé de projet : ouvrir le panneau local pour rattacher l'écran à un projet")
+			log.Printf("[agent] aucune clé de projet ; panneau : http://%s", cfg.Agent.LocalAddr)
+			<-ctx.Done()
+			return ctx.Err()
+		}
+	}
 
 	// 1. Inscription (ou reprise) auprès du portail.
 	st, err := portal.LoadState(cfg.Agent.StateDir)
 	if err != nil {
+		status.Global.SetPhase("enrolling", "Inscription auprès du portail…")
 		st, err = enroll(ctx, cfg)
 		if err != nil {
 			return err
 		}
 	}
+	status.Global.Update(func(x *status.Snapshot) { x.DeviceID = st.DeviceID })
 	pc := portal.New(cfg.Portal.URL, st.Token)
 
 	// 2. Attente de l'approbation. Le portail livre la clé Headscale une seule fois.
@@ -343,6 +434,7 @@ func runOnce(ctx context.Context, cfg *config.Config, verbose bool) error {
 			break
 		}
 		log.Printf("[agent] appareil %s : %s — en attente d'approbation dans %s", cfg.Screen.ID, s.Status, cfg.Portal.URL)
+		status.Global.SetPhase("pending", map[string]string{"pending": "En attente d'approbation dans le portail", "rejected": "Refusé dans le portail", "revoked": "Révoqué dans le portail"}[s.Status])
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -354,6 +446,7 @@ func runOnce(ctx context.Context, cfg *config.Config, verbose bool) error {
 	}
 
 	// 3. Tunnel.
+	status.Global.SetPhase("connecting", "Connexion au réseau privé…")
 	log.Printf("[agent] %s v%s : connexion au réseau %s", cfg.Screen.ID, version, st.ControlURL)
 	tn, err := tunnel.Start(ctx, tunnel.Options{
 		Hostname: cfg.Screen.ID, ControlURL: st.ControlURL, AuthKey: authKey,
@@ -373,6 +466,8 @@ func runOnce(ctx context.Context, cfg *config.Config, verbose bool) error {
 		pc.AckKey(ctx)
 	}
 	log.Printf("[agent] connecté, ip réseau privé %s", tn.IPv4())
+	status.Global.Update(func(x *status.Snapshot) { x.TailnetIP = tn.IPv4().String() })
+	status.Global.SetPhase("online", "En ligne")
 
 	a := &agentState{cfg: cfg, pc: pc, tn: tn}
 
@@ -397,7 +492,9 @@ func runOnce(ctx context.Context, cfg *config.Config, verbose bool) error {
 		}
 		if err != nil {
 			log.Printf("[heartbeat] %v", err)
+			status.Global.Update(func(x *status.Snapshot) { x.LastError = "heartbeat : " + err.Error() })
 		} else {
+			status.Global.Update(func(x *status.Snapshot) { x.LastHeartbeat = time.Now(); x.LastError = "" })
 			if resp.Status.Status != "approved" {
 				return fmt.Errorf("appareil %s dans le portail : arrêt du tunnel", resp.Status.Status)
 			}
@@ -472,6 +569,7 @@ func (a *agentState) reloadConfig(ctx context.Context) error {
 	a.remote, a.version, a.fwds, a.fwdStop = *remote, ver, fwds, cancel
 	a.mu.Unlock()
 	log.Printf("[config] version %d appliquée : %d forward(s), processeur %s:%d", ver, len(rules), remote.Processor.IP, remote.Processor.Port)
+	status.Global.Update(func(x *status.Snapshot) { x.Name = remote.Name })
 	return nil
 }
 
@@ -497,7 +595,9 @@ func (a *agentState) buildHeartbeat(ctx context.Context, rdID string) heartbeat.
 	p.RemoteDesktop.Provider = "rustdesk"
 	p.RemoteDesktop.ID = rdID
 	if remote.Processor.IP != "" {
-		p.Processor = probe.TCP(ctx, remote.Processor.IP, remote.Processor.Port)
+		r := probe.TCP(ctx, remote.Processor.IP, remote.Processor.Port)
+		p.Processor = r
+		status.Global.Update(func(x *status.Snapshot) { ok := r.Reachable; x.ProcessorOK, x.ProcessorAddr = &ok, r.Target })
 	}
 	stats := make([]forward.Stats, 0, len(fwds))
 	for _, f := range fwds {

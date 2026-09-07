@@ -11,20 +11,20 @@ Binaire unique, installé sur chaque laptop d'écran. Il :
 - exécute les commandes envoyées depuis le portail (requête HTTP locale, sonde, redémarrage, mise à jour) ;
 - s'installe comme service système (Windows, macOS, Linux) et redémarre seul en cas de perte réseau.
 
-## Installation sur un laptop
+## Installation sur un laptop Windows
 
-1. Copier `agent.exe` et `agent.toml` (voir `agent.example.toml`) dans un dossier, par ex. `C:\festival\`.
-2. Vérifier la config et la liaison avec le processeur, sans rejoindre le réseau :
+1. Créer un dossier, par ex. `C:\festival\`, y mettre `agent.exe` et `agent-tray.exe` (depuis la
+   dernière release GitHub, renommés sans le suffixe de version).
+2. Double-cliquer `agent-tray.exe` : une icône apparaît dans la barre des tâches (elle se relance à chaque
+   ouverture de session). Menu de l'icône :
+   - **Installer le service (administrateur)** : l'agent démarre avec Windows, avant l'ouverture de session.
+   - **Entrer la clé de projet…** : ouvre le panneau local (http://127.0.0.1:47632) où l'on colle la clé du
+     projet, l'identifiant de l'écran, l'IP du processeur, et où l'on voit/édite `agent.toml`.
+   - **Ouvrir le panneau** : statut, IP privée, dernier heartbeat, processeur.
+3. Approuver l'écran dans le portail (onglet Écrans du projet). Icône rouge = arrêté ou sans clé,
+   orange = en attente / connexion / processeur injoignable, verte = en ligne.
 
-   ```
-   agent.exe check
-   ```
-
-3. Installer et démarrer le service (invite en administrateur sous Windows) :
-
-   ```
-   agent.exe install
-   ```
+Sans icône (Linux, macOS, ou en ligne de commande) : `agent check`, `agent install`, `agent panel`.
 
 Autres commandes : `run` (premier plan, `-v` pour les logs du tunnel), `status`, `stop`, `start`,
 `restart`, `uninstall`.

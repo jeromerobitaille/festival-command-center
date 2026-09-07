@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Festival Command Center</title>
+<style>
+:root{--bg:#0f1115;--panel:#171a21;--line:#262a33;--fg:#e6e8ec;--muted:#8b93a1;--ok:#3ddc84;--warn:#ffb020;--ko:#ff5c5c;--accent:#5b9cff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:720px;margin:0 auto;padding:22px}h1{font-size:18px;margin:0 0 14px}h2{font-size:14px;margin:0 0 10px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:14px}
+.status{display:flex;align-items:center;gap:12px;font-size:16px}.dot{width:12px;height:12px;border-radius:50%;background:var(--muted)}.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.ko{background:var(--ko)}
+.kv{display:grid;grid-template-columns:150px 1fr;gap:4px 10px;margin-top:12px;font-size:13px}.kv dt{color:var(--muted)}.kv dd{margin:0}
+code,textarea{font:12px/1.5 ui-monospace,Menlo,Consolas,monospace}code{background:#0b0d11;border:1px solid var(--line);border-radius:5px;padding:2px 6px}
+label{display:block;margin:8px 0;color:var(--muted);font-size:12px}input,textarea{display:block;width:100%;margin-top:4px;background:#0b0d11;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:8px 10px;font-size:13px}
+textarea{min-height:220px}.row{display:flex;gap:10px}.row>*{flex:1}
+.btn{background:#1d212a;color:var(--fg);border:1px solid var(--line);border-radius:7px;padding:8px 14px;font:inherit;font-size:13px;cursor:pointer}.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}.btn.danger{color:var(--ko)}
+.btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.muted{color:var(--muted)}.small{font-size:12px}.err{color:var(--ko)}
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1d212a;border:1px solid var(--line);padding:9px 14px;border-radius:8px}
+</style></head>
+<body><main>
+<h1>Agent Festival Command Center <span class="muted small" id="ver"></span></h1>
+<section class="card">
+  <div class="status"><span class="dot" id="dot"></span><b id="phase">…</b></div>
+  <dl class="kv">
+    <dt>Écran</dt><dd id="screen">—</dd>
+    <dt>IP réseau privé</dt><dd><code id="ip">—</code></dd>
+    <dt>Portail</dt><dd id="portal">—</dd>
+    <dt>Processeur Tessera</dt><dd id="proc">—</dd>
+    <dt>Dernier heartbeat</dt><dd id="hb">—</dd>
+    <dt>Fichier</dt><dd><code id="path"></code></dd>
+  </dl>
+  <div class="btnrow"><button class="btn" onclick="post('/api/reload','Configuration relue')">Relire la configuration</button><button class="btn" onclick="post('/api/restart','Redémarrage demandé')">Redémarrer l'agent</button><button class="btn danger" onclick="if(confirm('Oublier l’inscription ? L’écran devra être ré-approuvé dans le portail.'))post('/api/reset','Inscription oubliée')">Réinscrire</button></div>
+</section>
+<section class="card">
+  <h2>Rattacher cet écran à un projet</h2>
+  <p class="muted small">La clé se trouve dans le portail, onglet Configuration du projet. Après enregistrement, l'écran apparaîtra en attente d'approbation dans l'onglet Écrans.</p>
+  <label>Portail <input id="f-portal" placeholder="https://panel.veam.ca"></label>
+  <label>Clé de projet <input id="f-key" placeholder="fcc_…"></label>
+  <div class="row"><label>Identifiant de l'écran <input id="f-id" placeholder="ecran-01"></label><label>Nom affiché <input id="f-name" placeholder="Place des Festivals - Nord"></label></div>
+  <label>IP du processeur Tessera (facultatif) <input id="f-proc" placeholder="192.168.0.10"></label>
+  <button class="btn primary" onclick="saveProject()">Enregistrer et s'inscrire</button>
+</section>
+<section class="card">
+  <h2>Fichier de configuration</h2>
+  <textarea id="toml" spellcheck="false"></textarea>
+  <div class="btnrow"><button class="btn primary" onclick="saveToml()">Enregistrer le fichier</button><button class="btn" onclick="loadToml()">Recharger</button></div>
+  <p class="err small" id="tomlerr"></p>
+</section>
+</main>
+<div id="toast" hidden></div>
+<script>
+const $=id=>document.getElementById(id);
+function toast(m){const t=$('toast');t.textContent=m;t.hidden=false;setTimeout(()=>t.hidden=true,2500)}
+async function post(url,msg,body,method){const r=await fetch(url,{method:method||'POST',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error||r.statusText)}if(msg)toast(msg);setTimeout(refresh,800)}
+async function refresh(){try{const s=await (await fetch('/api/status')).json();
+ $('ver').textContent='v'+s.version;$('phase').textContent=s.message||s.phase;$('screen').textContent=(s.name?s.name+' · ':'')+(s.screen_id||'—');$('ip').textContent=s.tailnet_ip||'—';$('portal').textContent=(s.portal_url||'—')+(s.has_project_key?'':'  (aucune clé de projet)');$('path').textContent=s.config_path;
+ $('proc').textContent=s.processor_ok==null?'—':(s.processor_ok?'joignable':'injoignable')+' · '+s.processor_addr;$('hb').textContent=s.last_heartbeat&&!s.last_heartbeat.startsWith('0001')?new Date(s.last_heartbeat).toLocaleTimeString('fr-CA'):'—';
+ const d=$('dot');d.className='dot '+({online:'ok',pending:'warn',connecting:'warn',enrolling:'warn',error:'ko','no-key':'ko'}[s.phase]||'');
+ if(!$('f-portal').value)$('f-portal').value=s.portal_url||'';if(!$('f-id').value)$('f-id').value=s.screen_id||'';if(!$('f-name').value)$('f-name').value=s.name||'';
+}catch(e){$('phase').textContent='agent injoignable (service arrêté ?)';$('dot').className='dot ko'}}
+async function loadToml(){const c=await (await fetch('/api/config')).json();$('toml').value=c.toml;$('tomlerr').textContent=''}
+async function saveToml(){try{await post('/api/config','Fichier enregistré, configuration relue',{toml:$('toml').value},'PUT');$('tomlerr').textContent=''}catch(e){$('tomlerr').textContent=e.message}}
+async function saveProject(){try{await post('/api/project','Enregistré : approuver l’écran dans le portail',{portal_url:$('f-portal').value,project_key:$('f-key').value,screen_id:$('f-id').value,name:$('f-name').value,processor_ip:$('f-proc').value});$('f-key').value='';loadToml()}catch(e){toast('Erreur : '+e.message)}}
+refresh();loadToml();setInterval(refresh,5000);
+if(location.hash==='#key')$('f-key').focus();
+</script></body></html>

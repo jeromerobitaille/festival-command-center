@@ -48,6 +48,8 @@ type Release struct {
 	Asset   string
 	SHA256  string
 	URL     string
+	// Compagnons optionnels (ex. agent-tray) : nom d'asset -> sha256
+	Extras map[string]string
 }
 
 func PublicKey() (ed25519.PublicKey, error) {
@@ -100,7 +102,8 @@ func Check(ctx context.Context, o Options) (*Release, error) {
 		suffix = ".exe"
 	}
 	re := regexp.MustCompile(`^agent_(\d+\.\d+\.\d+[0-9A-Za-z.\-]*)_` + runtime.GOOS + `_` + runtime.GOARCH + regexp.QuoteMeta(suffix) + `$`)
-	var rel *Release
+	reExtra := regexp.MustCompile(`^(agent-[a-z]+)_(\d+\.\d+\.\d+[0-9A-Za-z.\-]*)_` + runtime.GOOS + `_` + runtime.GOARCH + regexp.QuoteMeta(suffix) + `$`)
+	rel := &Release{Extras: map[string]string{}}
 	sc := bufio.NewScanner(strings.NewReader(string(sums)))
 	for sc.Scan() {
 		f := strings.Fields(sc.Text())
@@ -108,10 +111,12 @@ func Check(ctx context.Context, o Options) (*Release, error) {
 			continue
 		}
 		if m := re.FindStringSubmatch(f[1]); m != nil {
-			rel = &Release{Version: m[1], Asset: f[1], SHA256: strings.ToLower(f[0])}
+			rel.Version, rel.Asset, rel.SHA256 = m[1], f[1], strings.ToLower(f[0])
+		} else if m := reExtra.FindStringSubmatch(f[1]); m != nil {
+			rel.Extras[f[1]] = strings.ToLower(f[0])
 		}
 	}
-	if rel == nil {
+	if rel.Asset == "" {
 		return nil, fmt.Errorf("aucun binaire pour %s/%s dans la dernière release", runtime.GOOS, runtime.GOARCH)
 	}
 	rel.URL = o.BaseURL + "/download/v" + rel.Version + "/" + rel.Asset
@@ -127,10 +132,35 @@ func Check(ctx context.Context, o Options) (*Release, error) {
 }
 
 // Apply télécharge le binaire, vérifie son SHA-256 et remplace l'exécutable courant.
-// L'ancien binaire est conservé en <exe>.old (voir CleanupOld).
+// L'ancien binaire est conservé en <exe>.old (voir CleanupOld). Les compagnons présents à côté
+// (agent-tray) sont mis à jour de la même façon.
 func Apply(ctx context.Context, o Options, rel *Release) error {
 	o.defaults()
+	if err := replaceBinary(ctx, o, rel.URL, rel.SHA256, o.ExePath); err != nil {
+		return err
+	}
 	dir := filepath.Dir(o.ExePath)
+	for asset, sum := range rel.Extras {
+		name := asset[:strings.Index(asset, "_")] // agent-tray
+		if runtime.GOOS == "windows" {
+			name += ".exe"
+		}
+		target := filepath.Join(dir, name)
+		if _, err := os.Stat(target); err != nil {
+			continue // compagnon non installé ici
+		}
+		url := o.BaseURL + "/download/v" + rel.Version + "/" + asset
+		if err := replaceBinary(ctx, o, url, sum, target); err != nil {
+			o.Logf("[update] %s : %v (l'agent principal est à jour)", name, err)
+		}
+	}
+	return nil
+}
+
+func replaceBinary(ctx context.Context, o Options, url, sha string, exePath string) error {
+	dir := filepath.Dir(exePath)
+	rel := &Release{URL: url, SHA256: sha, Asset: filepath.Base(url)}
+	o.ExePath = exePath
 	tmp := filepath.Join(dir, ".agent.download")
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
 	if err != nil {

@@ -11,6 +11,12 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+// DefaultPortalURL est utilisé quand portal.url est absent.
+const DefaultPortalURL = "https://panel.veam.ca"
+
+// DefaultLocalAddr : API et panneau locaux.
+const DefaultLocalAddr = "127.0.0.1:47632"
+
 type Config struct {
 	Portal    Portal    `toml:"portal"`
 	Screen    Screen    `toml:"screen"`
@@ -47,8 +53,9 @@ type Forward struct {
 }
 
 type Agent struct {
-	StateDir string `toml:"state_dir"`
-	LogFile  string `toml:"log_file"`
+	StateDir  string `toml:"state_dir"`
+	LogFile   string `toml:"log_file"`
+	LocalAddr string `toml:"local_addr"` // API/panneau local, défaut 127.0.0.1:47632
 }
 
 type Update struct {
@@ -71,6 +78,12 @@ func Load(path string) (*Config, error) {
 	var c Config
 	md, err := toml.DecodeFile(abs, &c)
 	if err != nil {
+		if os.IsNotExist(err) {
+			// Pas encore de fichier : configuration par défaut, à compléter depuis le panneau local.
+			c.Path = abs
+			c.applyDefaults()
+			return &c, nil
+		}
 		return nil, fmt.Errorf("lecture de %s : %w", abs, err)
 	}
 	if undecoded := md.Undecoded(); len(undecoded) > 0 {
@@ -90,6 +103,10 @@ func Load(path string) (*Config, error) {
 
 func (c *Config) applyDefaults() {
 	c.Portal.URL = strings.TrimRight(strings.TrimSpace(c.Portal.URL), "/")
+	if c.Portal.URL == "" {
+		c.Portal.URL = DefaultPortalURL
+	}
+	c.Portal.ProjectKey = strings.TrimSpace(c.Portal.ProjectKey)
 	if c.Screen.ID == "" {
 		h, _ := os.Hostname()
 		c.Screen.ID = h
@@ -100,6 +117,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Processor.Port == 0 {
 		c.Processor.Port = 37564
+	}
+	if c.Agent.LocalAddr == "" {
+		c.Agent.LocalAddr = DefaultLocalAddr
 	}
 	if c.Agent.StateDir == "" {
 		c.Agent.StateDir = filepath.Join(filepath.Dir(c.Path), "state")
@@ -117,12 +137,10 @@ func (c *Config) applyDefaults() {
 }
 
 func (c *Config) validate() error {
-	if c.Portal.URL == "" || !strings.HasPrefix(c.Portal.URL, "http") {
-		return fmt.Errorf("portal.url est requis (ex. https://panel.veam.ca)")
+	if !strings.HasPrefix(c.Portal.URL, "http") {
+		return fmt.Errorf("portal.url invalide : %q", c.Portal.URL)
 	}
-	if c.Portal.ProjectKey == "" {
-		return fmt.Errorf("portal.project_key est requis (Configuration du projet dans le portail)")
-	}
+	// project_key peut être vide : l'agent démarre et attend qu'on la saisisse (panneau local).
 	if c.Screen.ID == "" {
 		return fmt.Errorf("screen.id est requis")
 	}
