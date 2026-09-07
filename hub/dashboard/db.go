@@ -24,13 +24,13 @@ CREATE TABLE IF NOT EXISTS projects(
   timezone TEXT NOT NULL DEFAULT 'America/Toronto', dashboard TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS project_members(project_id INTEGER NOT NULL, user_id INTEGER NOT NULL, PRIMARY KEY(project_id,user_id));
 CREATE TABLE IF NOT EXISTS devices(
-  id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, screen_id TEXT NOT NULL, name TEXT NOT NULL,
+  id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, slug TEXT NOT NULL, name TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending', token_hash TEXT UNIQUE NOT NULL,
   hostname TEXT DEFAULT '', os TEXT DEFAULT '', arch TEXT DEFAULT '', agent_version TEXT DEFAULT '', tailnet_ip TEXT DEFAULT '',
   config TEXT NOT NULL DEFAULT '{}', config_version INTEGER NOT NULL DEFAULT 1,
   headscale_key TEXT DEFAULT '', headscale_key_delivered INTEGER NOT NULL DEFAULT 0,
   last_heartbeat TEXT DEFAULT '', last_seen TEXT DEFAULT '', enrolled_at TEXT NOT NULL, approved_at TEXT DEFAULT '',
-  UNIQUE(project_id, screen_id));
+  UNIQUE(project_id, slug));
 CREATE TABLE IF NOT EXISTS actions(
   id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'hub',
   device_id INTEGER, method TEXT NOT NULL DEFAULT 'GET', url TEXT NOT NULL, headers TEXT NOT NULL DEFAULT '{}',
@@ -51,6 +51,7 @@ func openDB(path string) (*sql.DB, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(4) // WAL : lecteurs concurrents ; busy_timeout gère l'écrivain unique
+	migrate(db)
 	for _, stmt := range strings.Split(schema, ";\n") {
 		if strings.TrimSpace(stmt) == "" {
 			continue
@@ -60,6 +61,29 @@ func openDB(path string) (*sql.DB, error) {
 		}
 	}
 	return db, nil
+}
+
+// migrate : renommages de colonnes des versions précédentes.
+func migrate(db *sql.DB) {
+	rows, err := db.Query(`PRAGMA table_info(devices)`)
+	if err != nil {
+		return
+	}
+	hasScreenID := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, pk int
+		var dflt any
+		rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk)
+		if name == "screen_id" {
+			hasScreenID = true
+		}
+	}
+	rows.Close()
+	if hasScreenID {
+		db.Exec(`ALTER TABLE devices RENAME COLUMN screen_id TO slug`)
+	}
 }
 
 func now() string { return time.Now().UTC().Format(time.RFC3339) }

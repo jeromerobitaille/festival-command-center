@@ -107,9 +107,11 @@ func (s *Server) postProject(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		PortalURL  string `json:"portal_url"`
 		ProjectKey string `json:"project_key"`
-		ScreenID   string `json:"screen_id"`
+		DeviceID   string `json:"device_id"`
 		Name       string `json:"name"`
-		ProcIP     string `json:"processor_ip"`
+		SubName    string `json:"sub_name"`
+		SubIP      string `json:"sub_ip"`
+		SubPort    int    `json:"sub_port"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&in); err != nil {
 		jsonError(w, 400, "JSON invalide")
@@ -134,10 +136,20 @@ func (s *Server) postProject(w http.ResponseWriter, r *http.Request) {
 	}
 	set("portal", "url", strings.TrimSpace(in.PortalURL))
 	set("portal", "project_key", strings.TrimSpace(in.ProjectKey))
-	set("screen", "id", config.Slugify(in.ScreenID))
-	set("screen", "name", strings.TrimSpace(in.Name))
-	if ip := strings.TrimSpace(in.ProcIP); ip != "" {
-		set("processor", "ip", ip)
+	set("device", "id", config.Slugify(in.DeviceID))
+	set("device", "name", strings.TrimSpace(in.Name))
+	delete(doc, "screen") // anciennes clés remplacées
+	delete(doc, "processor")
+	if ip := strings.TrimSpace(in.SubIP); ip != "" {
+		name := strings.TrimSpace(in.SubName)
+		if name == "" {
+			name = "sous-appareil"
+		}
+		port := in.SubPort
+		if port == 0 {
+			port = 80
+		}
+		doc["sub_device"] = []map[string]any{{"name": name, "ip": ip, "port": port}}
 	}
 	var sb strings.Builder
 	sb.WriteString("# Configuration locale de l'agent Festival Command Center (modifiée depuis le panneau).\n")
@@ -176,13 +188,15 @@ func DefaultTOML() string {
 url         = "` + config.DefaultPortalURL + `"
 project_key = ""
 
-[screen]
-id   = ""      # vide = nom de l'ordinateur
+[device]
+id   = ""      # identifiant dans le projet ; vide = nom de l'ordinateur
 name = ""
 
-[processor]
-ip   = ""      # processeur Tessera branché en direct (facultatif)
-port = 37564
+# Sous-appareils sur le réseau local de cet appareil (facultatif, répétable).
+# [[sub_device]]
+# name = "Processeur LED"
+# ip   = "192.168.0.10"
+# port = 37564
 `
 }
 

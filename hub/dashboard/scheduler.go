@@ -120,12 +120,12 @@ func (s *Server) RunAction(ctx context.Context, actionID int64, automationID *in
 	switch a.Kind {
 	case "agent":
 		if a.DeviceID == nil {
-			res = "erreur : aucun écran associé"
+			res = "erreur : aucun appareil associé"
 			break
 		}
 		d, err := s.getDevice(*a.DeviceID)
 		if err != nil || d.Status != "approved" {
-			res = "erreur : écran non approuvé"
+			res = "erreur : appareil non approuvé"
 			break
 		}
 		id, err := s.queueCommand(d.ID, "http_request", map[string]any{
@@ -136,7 +136,7 @@ func (s *Server) RunAction(ctx context.Context, actionID int64, automationID *in
 			break
 		}
 		if !d.Online {
-			res = fmt.Sprintf("en file (commande %d) : écran hors ligne, sera exécutée à sa reconnexion", id)
+			res = fmt.Sprintf("en file (commande %d) : appareil hors ligne, sera exécutée à sa reconnexion", id)
 		} else {
 			res = fmt.Sprintf("en file (commande %d) : envoyée à %s", id, d.Name)
 		}

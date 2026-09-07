@@ -14,7 +14,8 @@ import (
 
 type enrollRequest struct {
 	ProjectKey   string        `json:"project_key"`
-	ScreenID     string        `json:"screen_id"`
+	Slug         string        `json:"slug"`
+	ScreenID     string        `json:"screen_id"` // agents ≤ 0.4
 	Name         string        `json:"name"`
 	Hostname     string        `json:"hostname"`
 	OS           string        `json:"os"`
@@ -35,26 +36,29 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 401, "clé de projet inconnue")
 		return
 	}
-	req.ScreenID = slugify(req.ScreenID)
-	if req.ScreenID == "" {
-		jsonError(w, 400, "screen_id requis")
+	if req.Slug == "" {
+		req.Slug = req.ScreenID
+	}
+	req.Slug = slugify(req.Slug)
+	if req.Slug == "" {
+		jsonError(w, 400, "slug requis")
 		return
 	}
 	if req.Name == "" {
-		req.Name = req.ScreenID
+		req.Name = req.Slug
 	}
-	// Un appareil déjà connu (même projet, même screen_id) se ré-inscrit : nouveau jeton, statut conservé
+	// Un appareil déjà connu (même projet, même slug) se ré-inscrit : nouveau jeton, statut conservé
 	// sauf s'il avait été révoqué, auquel cas il repasse en attente.
 	token := randomToken("dev_", 32)
 	var existing Device
-	err = s.db.QueryRow(`SELECT id, status FROM devices WHERE project_id=? AND screen_id=?`, p.ID, req.ScreenID).Scan(&existing.ID, &existing.Status)
-	cfg := DeviceConfig{Name: req.Name, HeartbeatSeconds: 15, Processor: ProcessorConf{Port: 37564}, Update: UpdateConf{Enabled: true, CheckHours: 1}}
+	err = s.db.QueryRow(`SELECT id, status FROM devices WHERE project_id=? AND slug=?`, p.ID, req.Slug).Scan(&existing.ID, &existing.Status)
+	cfg := DeviceConfig{Name: req.Name, HeartbeatSeconds: 15, Update: UpdateConf{Enabled: true, CheckHours: 1}}
 	if req.LocalConfig != nil {
-		if req.LocalConfig.Processor.IP != "" {
-			cfg.Processor = req.LocalConfig.Processor
-		}
+		req.LocalConfig.normalize()
+		cfg.SubDevices = req.LocalConfig.SubDevices
 		cfg.Forwards = req.LocalConfig.Forwards
 	}
+	cfg.normalize()
 	cfgJSON, _ := json.Marshal(cfg)
 	if err == nil {
 		status := existing.Status
@@ -64,12 +68,12 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 		_, err = s.db.Exec(`UPDATE devices SET token_hash=?, status=?, hostname=?, os=?, arch=?, agent_version=?, headscale_key_delivered=0 WHERE id=?`,
 			hashToken(token), status, req.Hostname, req.OS, req.Arch, req.AgentVersion, existing.ID)
 	} else {
-		res, e := s.db.Exec(`INSERT INTO devices(project_id, screen_id, name, status, token_hash, hostname, os, arch, agent_version, config, enrolled_at)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?)`, p.ID, req.ScreenID, req.Name, "pending", hashToken(token), req.Hostname, req.OS, req.Arch, req.AgentVersion, string(cfgJSON), now())
+		res, e := s.db.Exec(`INSERT INTO devices(project_id, slug, name, status, token_hash, hostname, os, arch, agent_version, config, enrolled_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?)`, p.ID, req.Slug, req.Name, "pending", hashToken(token), req.Hostname, req.OS, req.Arch, req.AgentVersion, string(cfgJSON), now())
 		err = e
 		if e == nil {
 			existing.ID, _ = res.LastInsertId()
-			log.Printf("[agent] nouvel appareil %s en attente dans le projet %s", req.ScreenID, p.Slug)
+			log.Printf("[agent] nouvel appareil %s en attente dans le projet %s", req.Slug, p.Slug)
 		}
 	}
 	if err != nil {
@@ -146,7 +150,7 @@ func (s *Server) handleAgentConfig(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 403, "appareil non approuvé")
 		return
 	}
-	writeJSON(w, map[string]any{"version": d.ConfigVersion, "config": d.Config})
+	writeJSON(w, map[string]any{"version": d.ConfigVersion, "config": d.Config.forAgent()})
 }
 
 // POST /api/agent/heartbeat : état de l'agent ; réponse = statut, version de config, commandes en attente.
@@ -266,8 +270,8 @@ func (s *Server) approveDevice(ctx context.Context, d *Device) error {
 
 func (s *Server) revokeDevice(ctx context.Context, d *Device, status string) error {
 	if s.hs.enabled() {
-		if err := s.hs.DeleteNodes(ctx, d.ScreenID, d.ScreenID+"-probe"); err != nil {
-			log.Printf("[headscale] retrait des noeuds de %s : %v", d.ScreenID, err)
+		if err := s.hs.DeleteNodes(ctx, d.Slug, d.Slug+"-probe"); err != nil {
+			log.Printf("[headscale] retrait des noeuds de %s : %v", d.Slug, err)
 		}
 	}
 	_, err := s.db.Exec(`UPDATE devices SET status=?, headscale_key='', headscale_key_delivered=0, tailnet_ip='' WHERE id=?`, status, d.ID)

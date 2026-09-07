@@ -1,12 +1,12 @@
 # agent — Festival Command Center
 
-Binaire unique, installé sur chaque laptop d'écran. Il :
+Binaire unique, installé sur chaque appareil. Il :
 
 - s'inscrit auprès du **portail** avec la clé du projet et attend qu'un administrateur l'approuve ;
 - reçoit alors sa clé Headscale et rejoint le réseau WireGuard via **tsnet** (aucun logiciel tiers) ;
-- applique la configuration du portail (nom, processeur, forwards TCP/UDP, mises à jour) et la recharge
+- applique la configuration du portail (nom, sous-appareil, forwards TCP/UDP, mises à jour) et la recharge
   à chaud quand elle change ;
-- sonde le processeur et remonte un **heartbeat** : état, forwards, chemin (direct ou relais DERP) et
+- sonde le sous-appareil et remonte un **heartbeat** : état, forwards, chemin (direct ou relais DERP) et
   latence vers chaque pair, CPU/RAM/uptime, identifiant RustDesk ;
 - exécute les commandes envoyées depuis le portail (requête HTTP locale, sonde, redémarrage, mise à jour) ;
 - s'installe comme service système (Windows, macOS, Linux) et redémarre seul en cas de perte réseau.
@@ -20,11 +20,11 @@ Binaire unique, installé sur chaque laptop d'écran. Il :
    la session, ce qui permet de le configurer tout de suite. Menu de l'icône :
    - **Installer le service (administrateur)** : l'agent démarre avec Windows, avant l'ouverture de session.
    - **Entrer la clé de projet…** : ouvre le panneau dans une fenêtre de l'application (WebView2, intégré à
-     Windows 10/11 ; sinon le navigateur) où l'on colle la clé du projet, l'identifiant de l'écran, l'IP du
-     processeur, et où l'on voit/édite `agent.toml`.
-   - **Ouvrir le panneau** : statut, IP privée, dernier heartbeat, processeur.
-3. Approuver l'écran dans le portail (onglet Écrans du projet). Icône rouge = arrêté ou sans clé,
-   orange = en attente / connexion / processeur injoignable, verte = en ligne.
+     Windows 10/11 ; sinon le navigateur) où l'on colle la clé du projet, l'identifiant de l'appareil, l'IP du
+     sous-appareil, et où l'on voit/édite `agent.toml`.
+   - **Ouvrir le panneau** : statut, IP privée, dernier heartbeat, sous-appareil.
+3. Approuver l'appareil dans le portail (onglet Appareils du projet). Icône rouge = arrêté ou sans clé,
+   orange = en attente / connexion / sous-appareil injoignable, verte = en ligne.
 
 Sans icône (Linux, macOS, ou en ligne de commande) : `agent check`, `agent install`, `agent panel`.
 
@@ -39,13 +39,13 @@ agent probe 100.64.0.5:37564
 
 rejoint le réseau avec un noeud `<id>-probe`, affiche le chemin (direct ou relais) et la latence vers
 chaque pair, puis tente une connexion TCP à l'adresse donnée **à travers le tunnel**. C'est le test à
-faire quand Tessera Remote n'arrive pas à joindre un écran. Le fichier de config par défaut est `agent.toml` à côté du binaire ;
+faire quand Tessera Remote n'arrive pas à joindre un appareil. Le fichier de config par défaut est `agent.toml` à côté du binaire ;
 `-config chemin` pour en utiliser un autre. L'état du noeud (clés WireGuard) vit dans `state/` à
 côté de la config : le supprimer force une ré-inscription auprès de Headscale.
 
 ## Côté opérateur
 
-- **Tessera Remote** : Direct Connect vers `<ip tailnet de l'écran>:37564`.
+- **Tessera Remote** : Direct Connect vers `<ip tailnet de l'appareil>:37564`.
 - **Contrôle HTTP Tessera** : `http://<ip tailnet>:8080/` si le forward `tessera-http` est actif.
 - **Remote desktop** : RustDesk sur le laptop, pointé vers le serveur du hub (phase 2).
 
@@ -60,7 +60,7 @@ côté de la config : le supprimer force une ré-inscription auprès de Headscal
   vérification de la signature de `checksums.txt` puis du SHA-256 du binaire, remplacement du fichier
   (l'ancien reste en `agent.exe.old` jusqu'au prochain démarrage) et redémarrage du service.
 - `agent update` force une vérification immédiate ; `-force` installe même depuis un build `dev`.
-- Désactiver sur un écran : `[update] enabled = false`.
+- Désactiver sur un appareil : `[update] enabled = false`.
 
 Publier une version :
 

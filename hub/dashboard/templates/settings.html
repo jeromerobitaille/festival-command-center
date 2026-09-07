@@ -9,17 +9,17 @@
   </section>
   <section class="card">
     <h2>Clé de projet</h2>
-    <p class="muted small">À mettre dans le <code>agent.toml</code> de chaque laptop. Chaque nouvel écran devra être approuvé dans l'onglet Écrans.</p>
+    <p class="muted small">À mettre dans le <code>agent.toml</code> de chaque appareil. Chaque nouvel appareil devra être approuvé dans l'onglet Appareils.</p>
     <div class="keyrow"><code id="p-key">{{.Project.ProjectKey}}</code><button class="btn small" onclick="App.copy(document.getElementById('p-key').textContent)">Copier</button></div>
     <button class="btn danger small" onclick="Settings.rotate()">Régénérer la clé</button>
-    <p class="muted small">Régénérer n'affecte pas les écrans déjà approuvés, seulement les nouvelles inscriptions.</p>
+    <p class="muted small">Régénérer n'affecte pas les appareils déjà approuvés, seulement les nouvelles inscriptions.</p>
     <h3>agent.toml minimal</h3>
 <pre id="p-toml">[portal]
 url         = "{{"{{ORIGIN}}"}}"
 project_key = "{{.Project.ProjectKey}}"
 
-[screen]
-id   = "ecran-01"
+[device]
+id   = "appareil-01"
 name = "Nom affiché"</pre>
     <button class="btn small" onclick="App.copy(document.getElementById('p-toml').textContent)">Copier</button>
   </section>
@@ -31,7 +31,7 @@ name = "Nom affiché"</pre>
   </section>
   <section class="card danger-zone">
     <h2>Supprimer le projet</h2>
-    <p class="muted small">Révoque tous les écrans du réseau et efface actions, automatisations et tableau de bord.</p>
+    <p class="muted small">Révoque tous les appareils du réseau et efface actions, automatisations et tableau de bord.</p>
     <button class="btn danger" onclick="Settings.remove()">Supprimer « {{.Project.Name}} »</button>
   </section>
 </div>

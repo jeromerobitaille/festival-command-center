@@ -50,8 +50,9 @@ Commandes :
   start|stop|restart|status   contrôle du service
   check       valide la configuration locale et teste le processeur, sans contacter le portail
   probe <ip:port>  rejoint le réseau avec un noeud de diagnostic et teste une adresse du réseau privé
+                   (ex. : agent probe 100.64.0.5:37564 pour vérifier le forward d'un autre appareil)
   update      vérifie et installe la dernière release GitHub (signée), puis redémarre le service
-  reset       oublie l'inscription (jeton, réseau) : l'écran devra être ré-approuvé
+  reset       oublie l'inscription (jeton, réseau) : l'appareil devra être ré-approuvé
   panel       ouvre le panneau local (statut, clé de projet, configuration) dans le navigateur
   version
 
@@ -151,7 +152,7 @@ func main() {
 		}
 		os.Remove(installLog)
 		fmt.Println("service installé et démarré :", serviceName)
-		fmt.Println("→ approuver maintenant l'écran dans le portail :", cfg.Portal.URL)
+		fmt.Println("→ approuver maintenant l'appareil dans le portail :", cfg.Portal.URL)
 	case "uninstall":
 		_ = service.Control(svc, "stop")
 		if err := service.Control(svc, "uninstall"); err != nil {
@@ -191,7 +192,7 @@ func setupLog(cfg *config.Config) {
 
 func runCheck(cfg *config.Config) {
 	fmt.Printf("configuration OK : %s\n", cfg.Path)
-	fmt.Printf("écran      : %s (%s)\n", cfg.Screen.ID, cfg.Screen.Name)
+	fmt.Printf("appareil   : %s (%s)\n", cfg.Device.ID, cfg.Device.Name)
 	fmt.Printf("portail    : %s\n", cfg.Portal.URL)
 	fmt.Printf("state dir  : %s\n", cfg.Agent.StateDir)
 	if st, err := portal.LoadState(cfg.Agent.StateDir); err == nil {
@@ -202,12 +203,12 @@ func runCheck(cfg *config.Config) {
 	for _, f := range cfg.Forwards {
 		fmt.Printf("forward    : %-16s %s :%d -> %s (proposition)\n", f.Name, f.Proto, f.Listen, f.Target)
 	}
-	if cfg.Processor.IP != "" {
-		r := probe.TCP(context.Background(), cfg.Processor.IP, cfg.Processor.Port)
+	for _, sd := range cfg.SubDevices {
+		r := probe.TCP(context.Background(), sd.IP, sd.Port)
 		if r.Reachable {
-			fmt.Printf("processeur : %s joignable (%.1f ms)\n", r.Target, r.RTTMS)
+			fmt.Printf("sous-app.  : %-16s %s joignable (%.1f ms)\n", sd.Name, r.Target, r.RTTMS)
 		} else {
-			fmt.Printf("processeur : %s INJOIGNABLE : %s\n", r.Target, r.Error)
+			fmt.Printf("sous-app.  : %-16s %s INJOIGNABLE : %s\n", sd.Name, r.Target, r.Error)
 		}
 	}
 	if id := sysinfo.RustDeskID(context.Background()); id != "" {
@@ -399,15 +400,15 @@ func runOnce(ctx context.Context, cfg *config.Config, verbose bool) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	status.Global.Update(func(x *status.Snapshot) {
-		x.Version, x.ScreenID, x.Name, x.PortalURL = version, cfg.Screen.ID, cfg.Screen.Name, cfg.Portal.URL
+		x.Version, x.Slug, x.Name, x.PortalURL = version, cfg.Device.ID, cfg.Device.Name, cfg.Portal.URL
 		x.HasProjectKey, x.ConfigPath = cfg.Portal.ProjectKey != "", cfg.Path
-		x.TailnetIP, x.ProcessorOK, x.LastHeartbeat = "", nil, time.Time{}
+		x.TailnetIP, x.SubDevices, x.LastHeartbeat = "", nil, time.Time{}
 	})
 
 	// 0. Sans clé de projet, on attend qu'elle soit saisie (panneau local ou agent.toml).
 	if cfg.Portal.ProjectKey == "" {
 		if _, err := portal.LoadState(cfg.Agent.StateDir); err != nil {
-			status.Global.SetPhase("no-key", "Aucune clé de projet : ouvrir le panneau local pour rattacher l'écran à un projet")
+			status.Global.SetPhase("no-key", "Aucune clé de projet : ouvrir le panneau local pour rattacher l'appareil à un projet")
 			log.Printf("[agent] aucune clé de projet ; panneau : http://%s", cfg.Agent.LocalAddr)
 			<-ctx.Done()
 			return ctx.Err()
@@ -446,7 +447,7 @@ func runOnce(ctx context.Context, cfg *config.Config, verbose bool) error {
 			authKey = s.AuthKey
 			break
 		}
-		log.Printf("[agent] appareil %s : %s — en attente d'approbation dans %s", cfg.Screen.ID, s.Status, cfg.Portal.URL)
+		log.Printf("[agent] appareil %s : %s — en attente d'approbation dans %s", cfg.Device.ID, s.Status, cfg.Portal.URL)
 		status.Global.SetPhase("pending", map[string]string{"pending": "En attente d'approbation dans le portail", "rejected": "Refusé dans le portail", "revoked": "Révoqué dans le portail"}[s.Status])
 		select {
 		case <-ctx.Done():
@@ -455,14 +456,14 @@ func runOnce(ctx context.Context, cfg *config.Config, verbose bool) error {
 		}
 	}
 	if !st.Joined && authKey == "" {
-		return fmt.Errorf("approuvé mais aucune clé réseau reçue : révoquer puis ré-approuver l'écran dans le portail")
+		return fmt.Errorf("approuvé mais aucune clé réseau reçue : révoquer puis ré-approuver l'appareil dans le portail")
 	}
 
 	// 3. Tunnel.
 	status.Global.SetPhase("connecting", "Connexion au réseau privé…")
-	log.Printf("[agent] %s v%s : connexion au réseau %s", cfg.Screen.ID, version, st.ControlURL)
+	log.Printf("[agent] %s v%s : connexion au réseau %s", cfg.Device.ID, version, st.ControlURL)
 	tn, err := tunnel.Start(ctx, tunnel.Options{
-		Hostname: cfg.Screen.ID, ControlURL: st.ControlURL, AuthKey: authKey,
+		Hostname: cfg.Device.ID, ControlURL: st.ControlURL, AuthKey: authKey,
 		StateDir: filepath.Join(cfg.Agent.StateDir, "tsnet"), Verbose: verbose,
 	})
 	if err != nil {
@@ -536,13 +537,16 @@ func runOnce(ctx context.Context, cfg *config.Config, verbose bool) error {
 
 func enroll(ctx context.Context, cfg *config.Config) (*portal.DeviceState, error) {
 	host, _ := os.Hostname()
-	local := &portal.DeviceConfig{Processor: portal.ProcessorConf{IP: cfg.Processor.IP, Port: cfg.Processor.Port}}
+	local := &portal.DeviceConfig{}
+	for _, sd := range cfg.SubDevices {
+		local.SubDevices = append(local.SubDevices, portal.SubDeviceConf{Name: sd.Name, IP: sd.IP, Port: sd.Port})
+	}
 	for _, f := range cfg.Forwards {
 		local.Forwards = append(local.Forwards, portal.ForwardConf{Name: f.Name, Proto: f.Proto, Listen: f.Listen, Target: f.Target})
 	}
 	pc := portal.New(cfg.Portal.URL, "")
 	id, token, err := pc.Enroll(ctx, portal.EnrollRequest{
-		ProjectKey: cfg.Portal.ProjectKey, ScreenID: cfg.Screen.ID, Name: cfg.Screen.Name,
+		ProjectKey: cfg.Portal.ProjectKey, Slug: cfg.Device.ID, Name: cfg.Device.Name,
 		Hostname: host, OS: runtime.GOOS, Arch: runtime.GOARCH, AgentVersion: version, LocalConfig: local,
 	})
 	if err != nil {
@@ -552,7 +556,7 @@ func enroll(ctx context.Context, cfg *config.Config) (*portal.DeviceState, error
 	if err := portal.SaveState(cfg.Agent.StateDir, st); err != nil {
 		return nil, err
 	}
-	log.Printf("[agent] inscrit comme appareil #%d : approuver l'écran dans %s", id, cfg.Portal.URL)
+	log.Printf("[agent] inscrit comme appareil #%d : approuver l'appareil dans %s", id, cfg.Portal.URL)
 	return st, nil
 }
 
@@ -581,7 +585,7 @@ func (a *agentState) reloadConfig(ctx context.Context) error {
 	a.mu.Lock()
 	a.remote, a.version, a.fwds, a.fwdStop = *remote, ver, fwds, cancel
 	a.mu.Unlock()
-	log.Printf("[config] version %d appliquée : %d forward(s), processeur %s:%d", ver, len(rules), remote.Processor.IP, remote.Processor.Port)
+	log.Printf("[config] version %d appliquée : %d forward(s), %d sous-appareil(s)", ver, len(rules), len(remote.SubDevices))
 	status.Global.Update(func(x *status.Snapshot) { x.Name = remote.Name })
 	return nil
 }
@@ -602,16 +606,24 @@ func (a *agentState) buildHeartbeat(ctx context.Context, rdID string) heartbeat.
 	remote, fwds := a.remote, a.fwds
 	a.mu.Unlock()
 	p := heartbeat.Payload{
-		ScreenID: a.cfg.Screen.ID, ScreenName: remote.Name, AgentVersion: version,
+		Slug: a.cfg.Device.ID, Name: remote.Name, AgentVersion: version,
 		Timestamp: time.Now().UTC(), TailnetIP: a.tn.IPv4().String(),
 	}
 	p.RemoteDesktop.Provider = "rustdesk"
 	p.RemoteDesktop.ID = rdID
-	if remote.Processor.IP != "" {
-		r := probe.TCP(ctx, remote.Processor.IP, remote.Processor.Port)
-		p.Processor = r
-		status.Global.Update(func(x *status.Snapshot) { ok := r.Reachable; x.ProcessorOK, x.ProcessorAddr = &ok, r.Target })
+	subs := make([]probe.Result, 0, len(remote.SubDevices))
+	st := make([]status.SubDev, 0, len(remote.SubDevices))
+	for _, sd := range remote.SubDevices {
+		if sd.IP == "" {
+			continue
+		}
+		r := probe.TCP(ctx, sd.IP, sd.Port)
+		r.Name = sd.Name
+		subs = append(subs, r)
+		st = append(st, status.SubDev{Name: sd.Name, Target: r.Target, Reachable: r.Reachable, RTTMS: r.RTTMS})
 	}
+	p.SubDevices = subs
+	status.Global.Update(func(x *status.Snapshot) { x.SubDevices = st })
 	stats := make([]forward.Stats, 0, len(fwds))
 	for _, f := range fwds {
 		stats = append(stats, f.Stats())
@@ -643,18 +655,23 @@ func (a *agentState) runCommand(ctx context.Context, c portal.Command) {
 		ok, result = localHTTP(ctx, req.Method, req.URL, req.Headers, req.Body, time.Duration(req.TimeoutSeconds)*time.Second)
 	case "probe":
 		a.mu.Lock()
-		pr := a.remote.Processor
+		subs := a.remote.SubDevices
 		a.mu.Unlock()
-		if pr.IP == "" {
-			ok, result = false, "aucun processeur configuré"
+		if len(subs) == 0 {
+			ok, result = false, "aucun sous-appareil configuré"
 			break
 		}
-		r := probe.TCP(ctx, pr.IP, pr.Port)
-		if r.Reachable {
-			result = fmt.Sprintf("processeur %s joignable en %.1f ms", r.Target, r.RTTMS)
-		} else {
-			ok, result = false, fmt.Sprintf("processeur %s injoignable : %s", r.Target, r.Error)
+		var parts []string
+		for _, sd := range subs {
+			r := probe.TCP(ctx, sd.IP, sd.Port)
+			if r.Reachable {
+				parts = append(parts, fmt.Sprintf("%s (%s) joignable en %.1f ms", sd.Name, r.Target, r.RTTMS))
+			} else {
+				ok = false
+				parts = append(parts, fmt.Sprintf("%s (%s) injoignable : %s", sd.Name, r.Target, r.Error))
+			}
 		}
+		result = strings.Join(parts, " ; ")
 	case "update":
 		v, err := applyUpdate(ctx, a.cfg, false)
 		if err != nil {
@@ -760,16 +777,16 @@ func runProbe(cfg *config.Config, target string, verbose bool) {
 	defer stop()
 	st, err := portal.LoadState(cfg.Agent.StateDir)
 	if err != nil {
-		log.Fatal("cet agent n'est pas encore inscrit/approuvé : lancer d'abord `agent run` et approuver l'écran")
+		log.Fatal("cet agent n'est pas encore inscrit/approuvé : lancer d'abord `agent run` et approuver l'appareil")
 	}
 	pc := portal.New(cfg.Portal.URL, st.Token)
 	controlURL, key, err := pc.ProbeKey(ctx)
 	if err != nil {
 		log.Fatal("clé de diagnostic : ", err)
 	}
-	fmt.Printf("connexion à %s (noeud de diagnostic %s-probe)...\n", controlURL, cfg.Screen.ID)
+	fmt.Printf("connexion à %s (noeud de diagnostic %s-probe)...\n", controlURL, cfg.Device.ID)
 	tn, err := tunnel.Start(ctx, tunnel.Options{
-		Hostname: cfg.Screen.ID + "-probe", ControlURL: controlURL, AuthKey: key,
+		Hostname: cfg.Device.ID + "-probe", ControlURL: controlURL, AuthKey: key,
 		StateDir: filepath.Join(cfg.Agent.StateDir, "probe"), Verbose: verbose, Ephemeral: true,
 	})
 	if err != nil {

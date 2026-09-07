@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -436,7 +437,7 @@ func (s *Server) apiApproveDevice(w http.ResponseWriter, r *http.Request, d *Dev
 		jsonError(w, 502, "Headscale : "+err.Error())
 		return
 	}
-	log.Printf("[portail] %s approuve l'appareil %s", currentUser(r).Username, d.ScreenID)
+	log.Printf("[portail] %s approuve l'appareil %s", currentUser(r).Username, d.Slug)
 	writeJSON(w, map[string]string{"status": "approved"})
 }
 
@@ -445,14 +446,23 @@ func (s *Server) apiSaveDeviceConfig(w http.ResponseWriter, r *http.Request, d *
 	if !decodeJSON(w, r, &cfg) {
 		return
 	}
+	cfg.normalize()
 	if cfg.Name == "" {
-		cfg.Name = d.ScreenID
+		cfg.Name = d.Slug
 	}
 	if cfg.HeartbeatSeconds < 5 {
 		cfg.HeartbeatSeconds = 15
 	}
-	if cfg.Processor.Port == 0 {
-		cfg.Processor.Port = 37564
+	for i, sd := range cfg.SubDevices {
+		if net.ParseIP(strings.TrimSpace(sd.IP)) == nil {
+			jsonError(w, 400, fmt.Sprintf("sous-appareil %q : adresse IP invalide", sd.Name))
+			return
+		}
+		if sd.Port <= 0 || sd.Port > 65535 {
+			jsonError(w, 400, fmt.Sprintf("sous-appareil %q : port invalide", sd.Name))
+			return
+		}
+		cfg.SubDevices[i].IP = strings.TrimSpace(sd.IP)
 	}
 	if cfg.Update.CheckHours <= 0 {
 		cfg.Update.CheckHours = 1
@@ -702,4 +712,23 @@ func boolInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+
+// heartbeatHasSubDeviceKO : au moins un sous-appareil injoignable dans le dernier heartbeat
+// (champ sub_devices ; processor pour les agents ≤ 0.4).
+func heartbeatHasSubDeviceKO(raw json.RawMessage) bool {
+	var hb struct {
+		SubDevices []struct{ Reachable bool `json:"reachable"` } `json:"sub_devices"`
+		Processor  *struct{ Reachable bool `json:"reachable"` }  `json:"processor"`
+	}
+	if json.Unmarshal(raw, &hb) != nil {
+		return false
+	}
+	for _, sd := range hb.SubDevices {
+		if !sd.Reachable {
+			return true
+		}
+	}
+	return len(hb.SubDevices) == 0 && hb.Processor != nil && !hb.Processor.Reachable
 }

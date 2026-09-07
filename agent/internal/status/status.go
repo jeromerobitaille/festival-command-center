@@ -8,7 +8,7 @@ import (
 
 type Snapshot struct {
 	Version       string    `json:"version"`
-	ScreenID      string    `json:"screen_id"`
+	Slug          string    `json:"slug"`
 	Name          string    `json:"name"`
 	PortalURL     string    `json:"portal_url"`
 	HasProjectKey bool      `json:"has_project_key"`
@@ -16,12 +16,18 @@ type Snapshot struct {
 	Message       string    `json:"message"` // texte lisible
 	TailnetIP     string    `json:"tailnet_ip"`
 	DeviceID      int64     `json:"device_id"`
-	ProcessorOK   *bool     `json:"processor_ok"`
-	ProcessorAddr string    `json:"processor_addr"`
+	SubDevices    []SubDev  `json:"sub_devices"`
 	LastHeartbeat time.Time `json:"last_heartbeat"`
 	LastError     string    `json:"last_error"`
 	UpdatedAt     time.Time `json:"updated_at"`
 	ConfigPath    string    `json:"config_path"`
+}
+
+type SubDev struct {
+	Name      string  `json:"name"`
+	Target    string  `json:"target"`
+	Reachable bool    `json:"reachable"`
+	RTTMS     float64 `json:"rtt_ms"`
 }
 
 type Store struct {

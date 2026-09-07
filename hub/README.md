@@ -9,7 +9,7 @@ Tout le côté serveur, sur **un seul VPS** (OVH VPS-2 à Beauharnois suffit), e
 | `caddy` | TLS Let's Encrypt et reverse proxy | 80, 443 (tcp+udp) |
 | `headscale` | plan de contrôle du réseau WireGuard **et** relais DERP intégré avec STUN | via `hub.DOMAINE`, 3478/udp |
 | `hbbs` / `hbbr` | serveur d'identifiants et relais RustDesk | 21115-21119/tcp, 21116/udp |
-| `dashboard` | le **portail** : comptes et rôles, projets, approbation et configuration à distance des écrans, tableaux de bord, actions HTTP, automatisations | via `panel.DOMAINE` |
+| `dashboard` | le **portail** : comptes et rôles, projets, approbation et configuration à distance des appareils, tableaux de bord, actions HTTP, automatisations | via `panel.DOMAINE` |
 | `headplane` | interface d'administration Headscale (noeuds, utilisateurs, clés, ACL) | via `hub.DOMAINE/admin` |
 
 Le DERP intégré de Headscale est déclaré région 900 « mtl ». Les relais publics de Tailscale restent en
@@ -43,7 +43,7 @@ enregistrés dans Headscale peuvent utiliser le relais (`verify_clients`).
    tailscale up --login-server https://hub.DOMAINE --auth-key <clé de pré-auth>
    ```
 
-   Ensuite Tessera Remote se connecte en Direct Connect à `<ip tailnet de l'écran>:37564`, adresse
+   Ensuite Tessera Remote se connecte en Direct Connect à `<ip tailnet de l'appareil>:37564`, adresse
    affichée dans le dashboard.
 
 5. **RustDesk** sur les laptops et sur le poste de la régie : dans Paramètres → Réseau, `ID server` et
@@ -58,13 +58,13 @@ enregistrés dans Headscale peuvent utiliser le relais (`verify_clients`).
   (voit les projets dont il est membre, lance les actions, ne modifie rien). Gestion dans *Utilisateurs*.
 - **Projets** : chaque projet a sa **clé** (onglet *Configuration*), à mettre dans le `agent.toml` des
   laptops. Les membres non-admin y sont cochés au même endroit.
-- **Écrans** : un agent qui se connecte avec la clé apparaît *en attente*. À l'approbation, le portail
+- **Appareils** : un agent qui se connecte avec la clé apparaît *en attente*. À l'approbation, le portail
   crée une clé Headscale via l'API (d'où `./scripts/portal-headscale-key.sh`) et l'agent rejoint le réseau.
-  La configuration de chaque écran (nom, processeur, forwards, mises à jour) se modifie dans le portail et
+  La configuration de chaque appareil (nom, sous-appareils, forwards, mises à jour) se modifie dans le portail et
   l'agent l'applique au prochain heartbeat. Boutons : sonder, redémarrer, mettre à jour, révoquer.
-- **Actions** : requêtes HTTP exécutées par le hub (API externe) ou par l'agent d'un écran (réseau local,
-  ex. l'API HTTP du Tessera). **Automatisations** : horaire cron dans le fuseau du projet → action.
-- **Tableau de bord** : grille de widgets par projet (statut des écrans, détail d'un écran, bouton
+- **Actions** : requêtes HTTP exécutées par le hub (API externe) ou par l'agent d'un appareil (réseau local,
+  ex. l'API HTTP d'un processeur LED). **Automatisations** : horaire cron dans le fuseau du projet → action.
+- **Tableau de bord** : grille de widgets par projet (statut des appareils, détail d'un appareil, bouton
   d'action, automatisations, note), déplaçables et redimensionnables en mode *Modifier*.
 - Données : SQLite dans le volume `dashboard-data` (`portal.sqlite`). À sauvegarder avec les autres volumes.
 

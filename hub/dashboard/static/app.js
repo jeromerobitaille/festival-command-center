@@ -43,10 +43,11 @@ const App = {
 };
 
 /* ---------- rendu partagé d'un écran ---------- */
+function subDevicesOf(hb) { return hb.sub_devices || (hb.processor ? [Object.assign({ name: 'Processeur' }, hb.processor)] : []); }
 function deviceTile(d) {
   const hb = d.last_heartbeat || {};
-  const proc = hb.processor;
-  const procTxt = !d.online ? '' : proc ? (proc.reachable ? `<span class="dot ok"></span>Tessera ${proc.rtt_ms.toFixed(1)} ms` : `<span class="dot ko"></span>Tessera injoignable`) : '<span class="muted">pas de processeur</span>';
+  const subs = subDevicesOf(hb);
+  const procTxt = !d.online ? '' : subs.length ? subs.map(sd => `<span class="dot ${sd.reachable ? 'ok' : 'ko'}"></span>${App.esc(sd.name)}${sd.reachable ? ' ' + sd.rtt_ms.toFixed(1) + ' ms' : ' injoignable'}`).join('<br>') : '<span class="muted">aucun sous-appareil</span>';
   const relayed = (hb.peers || []).some(p => p.online && !p.direct);
   return `<div class="tile ${d.online ? '' : 'off'}"><b><span class="dot ${d.online ? 'ok' : 'ko'}"></span>${App.esc(d.name)}</b>
     <div>${d.online ? 'en ligne' : 'hors ligne depuis ' + App.age(d.age_seconds)}${relayed ? ' <span class="pill warn">relais</span>' : ''}</div>
@@ -55,13 +56,14 @@ function deviceTile(d) {
 
 function deviceDetail(d) {
   const hb = d.last_heartbeat || {};
-  const sys = hb.system || {}; const proc = hb.processor; const peers = (hb.peers || []).filter(p => p.online);
-  const tesseraAddr = d.tailnet_ip ? d.tailnet_ip + ':' + ((d.config.forwards || []).find(f => f.name === 'tessera-remote') || { listen: 37564 }).listen : '—';
+  const sys = hb.system || {}; const subs = subDevicesOf(hb); const peers = (hb.peers || []).filter(p => p.online);
+  const fwds = (d.config.forwards || []);
+  const fwdAddr = d.tailnet_ip && fwds.length ? fwds.map(f => `<code>${App.esc(d.tailnet_ip)}:${f.listen}</code> <span class="muted">${App.esc(f.name)} → ${App.esc(f.target)}</span>`).join('<br>') : '<span class="muted">aucun forward</span>';
   return `<dl class="kv">
     <dt>État</dt><dd>${d.online ? '<span class="ok-text">en ligne</span>, vu il y a ' + App.age(d.age_seconds) : '<span class="err">hors ligne</span> depuis ' + App.age(d.age_seconds)}</dd>
     <dt>IP réseau privé</dt><dd><code>${App.esc(d.tailnet_ip || '—')}</code></dd>
-    <dt>Tessera Direct Connect</dt><dd><code>${App.esc(tesseraAddr)}</code></dd>
-    <dt>Processeur</dt><dd>${proc ? (proc.reachable ? `<span class="dot ok"></span>${App.esc(proc.target)} · ${proc.rtt_ms.toFixed(1)} ms` : `<span class="dot ko"></span>${App.esc(proc.target)} · ${App.esc(proc.error || 'injoignable')}`) : '—'}</dd>
+    <dt>Adresses des forwards</dt><dd>${fwdAddr}</dd>
+    <dt>Sous-appareils</dt><dd>${subs.length ? subs.map(sd => sd.reachable ? `<span class="dot ok"></span>${App.esc(sd.name)} · ${App.esc(sd.target)} · ${sd.rtt_ms.toFixed(1)} ms` : `<span class="dot ko"></span>${App.esc(sd.name)} · ${App.esc(sd.target)} · ${App.esc(sd.error || 'injoignable')}`).join('<br>') : '—'}</dd>
     <dt>Chemin réseau</dt><dd>${peers.length ? peers.map(p => `${App.esc(p.hostname)} ${p.direct ? '<span class="pill ok">direct</span>' : '<span class="pill warn">relais ' + App.esc(p.relay) + '</span>'} ${p.latency_ms ? p.latency_ms.toFixed(1) + ' ms' : ''}`).join('<br>') : '<span class="muted">aucun pair en ligne</span>'}</dd>
     <dt>Laptop</dt><dd>${App.esc(sys.hostname || d.hostname)} · ${App.esc(sys.os || d.os)} ${sys.cpu_percent != null ? `· CPU ${Math.round(sys.cpu_percent)} % · RAM ${Math.round(sys.mem_percent)} % · allumé depuis ${App.age(sys.uptime_seconds)}` : ''}</dd>
     <dt>Agent</dt><dd>${App.esc(d.agent_version || '—')}</dd>
@@ -90,11 +92,11 @@ const Dash = {
     const rm = App.isAdmin() ? `<button class="btn small danger rm" onclick="Dash.remove('${w.id}')" ${Dash.editing ? '' : 'hidden'}>Retirer</button>` : '';
     return `<div class="widget-head"><h3>${App.esc(w.title || Dash.defaultTitle(w))}</h3>${rm}</div><div class="widget-body" data-wid="${w.id}"><span class="muted">…</span></div>`;
   },
-  defaultTitle(w) { return { screens: 'Écrans', screen: 'Écran', button: 'Action', automations: 'Automatisations', note: 'Note' }[w.type] || w.type; },
+  defaultTitle(w) { return { screens: 'Appareils', screen: 'Appareil', button: 'Action', automations: 'Automatisations', note: 'Note' }[w.type] || w.type; },
   async refresh() {
     try { Dash.data = await App.api('GET', `/api/projects/${PROJECT.id}/overview`); } catch { return; }
     const b = document.getElementById('pending-banner');
-    if (Dash.data.pending) { b.hidden = false; b.innerHTML = `<a href="/p/${PROJECT.slug}/devices">${Dash.data.pending} écran(s) en attente d'approbation</a>`; } else b.hidden = true;
+    if (Dash.data.pending) { b.hidden = false; b.innerHTML = `<a href="/p/${PROJECT.slug}/devices">${Dash.data.pending} appareil(s) en attente d'approbation</a>`; } else b.hidden = true;
     Dash.fill();
   },
   fill() {
@@ -108,11 +110,11 @@ const Dash = {
     const D = Dash.data;
     switch (w.type) {
       case 'screens': {
-        if (!D.devices.length) return '<span class="muted">Aucun écran approuvé.</span>';
+        if (!D.devices.length) return '<span class="muted">Aucun appareil approuvé.</span>';
         const on = D.devices.filter(d => d.online).length;
         return `<div class="muted small" style="margin-bottom:6px">${on}/${D.devices.length} en ligne</div><div class="tiles">${D.devices.map(deviceTile).join('')}</div>`;
       }
-      case 'screen': { const d = D.devices.find(x => x.id == w.device_id); return d ? deviceDetail(d) : '<span class="muted">Écran introuvable ou non approuvé.</span>'; }
+      case 'screen': { const d = D.devices.find(x => x.id == w.device_id); return d ? deviceDetail(d) : '<span class="muted">Appareil introuvable ou non approuvé.</span>'; }
       case 'button': {
         const a = D.actions.find(x => x.id == w.action_id); if (!a) return '<span class="muted">Action introuvable.</span>';
         return `<div class="bigbtn"><button class="btn primary" onclick="Dash.run(${a.id}, this)">${App.esc(a.name)}</button><div class="muted small" id="res-${w.id}">${a.last_run ? App.fmtDate(a.last_run) + ' · ' + App.esc(a.last_result) : 'jamais exécutée'}</div></div>`;
@@ -141,10 +143,10 @@ const Dash = {
     const D = Dash.data || { devices: [], actions: [] };
     App.modal(`<h2>Ajouter un widget</h2>
       <label>Type <select id="w-type" onchange="Dash.onType()">
-        <option value="screens">Statut de tous les écrans</option><option value="screen">Détail d'un écran</option>
+        <option value="screens">Statut de tous les appareils</option><option value="screen">Détail d'un appareil</option>
         <option value="button">Bouton d'action</option><option value="automations">Liste des automatisations</option><option value="note">Note</option></select></label>
       <label>Titre (optionnel) <input id="w-title"></label>
-      <label id="w-dev-l" hidden>Écran <select id="w-dev">${D.devices.map(d => `<option value="${d.id}">${App.esc(d.name)}</option>`).join('')}</select></label>
+      <label id="w-dev-l" hidden>Appareil <select id="w-dev">${D.devices.map(d => `<option value="${d.id}">${App.esc(d.name)}</option>`).join('')}</select></label>
       <label id="w-act-l" hidden>Action <select id="w-act">${D.actions.map(a => `<option value="${a.id}">${App.esc(a.name)}</option>`).join('')}</select></label>
       <label id="w-text-l" hidden>Texte <textarea id="w-text"></textarea></label>
       <div class="modal-foot"><button class="btn" onclick="App.closeModal()">Annuler</button><button class="btn primary" onclick="Dash.confirmAdd()">Ajouter</button></div>`);
@@ -177,20 +179,20 @@ const Devices = {
     document.getElementById('dev-refresh').textContent = 'mis à jour à ' + new Date().toLocaleTimeString('fr-CA');
     const pend = Devices.list.filter(d => d.status === 'pending');
     document.getElementById('pending-section').hidden = pend.length === 0;
-    document.getElementById('pending-list').innerHTML = pend.map(d => `<div class="card"><h2>${App.esc(d.screen_id)}</h2>
+    document.getElementById('pending-list').innerHTML = pend.map(d => `<div class="card"><h2>${App.esc(d.slug)}</h2>
       <div class="kv"><dt>Nom d'hôte</dt><dd>${App.esc(d.hostname)}</dd><dt>Système</dt><dd>${App.esc(d.os)} ${App.esc(d.arch)}</dd><dt>Agent</dt><dd>${App.esc(d.agent_version)}</dd><dt>Inscrit</dt><dd>${App.fmtDate(d.enrolled_at)}</dd>
-      <dt>Processeur proposé</dt><dd>${App.esc(d.config.processor && d.config.processor.ip || '—')}</dd></div>
+      <dt>Sous-appareils proposés</dt><dd>${(d.config.sub_devices || []).map(sd => App.esc(sd.name + ' ' + sd.ip + ':' + sd.port)).join('<br>') || '—'}</dd></div>
       ${App.isAdmin() ? `<div class="btnrow"><button class="btn primary" onclick="Devices.act(${d.id},'approve')">Approuver</button><button class="btn danger" onclick="Devices.act(${d.id},'reject')">Refuser</button></div>` : ''}</div>`).join('');
     const others = Devices.list.filter(d => d.status !== 'pending');
     const host = document.getElementById('device-list');
-    if (!others.length) { host.innerHTML = '<div class="empty">Aucun écran. Installez l\'agent avec la clé du projet : il apparaîtra ici en attente d\'approbation.</div>'; return; }
+    if (!others.length) { host.innerHTML = '<div class="empty">Aucun appareil. Installez l\'agent avec la clé du projet : il apparaîtra ici en attente d\'approbation.</div>'; return; }
     host.innerHTML = others.map(d => Devices.card(d)).join('');
   },
   card(d) {
     const open = Devices.open.has(d.id);
     const status = d.status === 'approved' ? (d.online ? '<span class="dot ok"></span>' : '<span class="dot ko"></span>') : '<span class="dot warn"></span>';
     const st = d.status === 'approved' ? (d.online ? 'en ligne' : 'hors ligne ' + App.age(d.age_seconds)) : d.status === 'revoked' ? 'révoqué' : 'refusé';
-    return `<div class="device" data-id="${d.id}"><div class="head" onclick="Devices.toggle(${d.id})">${status}<span class="name">${App.esc(d.name)}</span><span class="muted small">${App.esc(d.screen_id)}</span>
+    return `<div class="device" data-id="${d.id}"><div class="head" onclick="Devices.toggle(${d.id})">${status}<span class="name">${App.esc(d.name)}</span><span class="muted small">${App.esc(d.slug)}</span>
       <span class="grow"></span><span class="muted small">${st}</span>${d.tailnet_ip ? `<code>${App.esc(d.tailnet_ip)}</code>` : ''}<span class="muted">${open ? '▾' : '▸'}</span></div>
       ${open ? `<div class="body"><div>${deviceDetail(d)}<h3>Dernières commandes</h3><div class="cmds" id="cmds-${d.id}">…</div></div><div>${Devices.configForm(d)}</div></div>` : ''}</div>`;
   },
@@ -202,23 +204,32 @@ const Devices = {
   configForm(d) {
     const c = d.config; const ro = !App.isAdmin(); const dis = ro ? 'disabled' : '';
     const fwd = (c.forwards || []).map((f, i) => Devices.fwdRow(f, i, ro)).join('');
+    const subs = (c.sub_devices || []).map(sd => Devices.subRow(sd, ro)).join('');
     return `<h3>Configuration (appliquée à distance, version ${d.config_version})</h3>
       <div id="cfg-${d.id}">
       <div class="row"><label>Nom affiché <input id="c-name" value="${App.esc(c.name)}" ${dis}></label><label>Heartbeat (s) <input id="c-hb" type="number" value="${c.heartbeat_seconds || 15}" ${dis}></label></div>
-      <div class="row"><label>IP du processeur Tessera <input id="c-pip" value="${App.esc(c.processor && c.processor.ip || '')}" placeholder="192.168.0.10" ${dis}></label><label>Port <input id="c-pport" type="number" value="${c.processor && c.processor.port || 37564}" ${dis}></label></div>
-      <label>Forwards (écoute sur l'IP privée de l'écran → cible sur son réseau local)</label>
+      <label>Sous-appareils (équipements sur le réseau local de l'appareil, surveillés par l'agent)</label>
+      <div class="fwd-row sub muted small"><span>nom</span><span>IP</span><span>port</span><span></span></div>
+      <div id="subs">${subs}</div>
+      ${ro ? '' : `<button class="btn small" onclick="Devices.addSub()">Ajouter un sous-appareil</button>`}
+      <label>Forwards (écoute sur l'IP privée de l'appareil → cible sur son réseau local)</label>
       <div class="fwd-row muted small"><span>nom</span><span>proto</span><span>port</span><span>cible</span><span></span></div>
       <div id="fwds">${fwd}</div>
       ${ro ? '' : `<button class="btn small" onclick="Devices.addFwd()">Ajouter un forward</button>`}
       <div class="row"><label class="check"><input type="checkbox" id="c-upd" ${c.update && c.update.enabled ? 'checked' : ''} ${dis}> Mise à jour automatique</label><label>Vérification (heures) <input id="c-updh" type="number" value="${c.update && c.update.check_hours || 1}" ${dis}></label></div>
       </div>
       ${ro ? '' : `<div class="btnrow"><button class="btn primary" onclick="Devices.saveConfig(${d.id})">Enregistrer et appliquer</button>
-        <button class="btn" onclick="Devices.cmd(${d.id},'probe')" title="L'agent teste lui-même son processeur et remonte le résultat">Sonder</button>
+        <button class="btn" onclick="Devices.cmd(${d.id},'probe')" title="L'agent teste lui-même ses sous-appareils et remonte le résultat">Sonder</button>
         <button class="btn" onclick="Devices.cmd(${d.id},'restart')">Redémarrer l'agent</button>
         <button class="btn" onclick="Devices.cmd(${d.id},'update')">Mettre à jour maintenant</button>
         ${d.status === 'approved' ? `<button class="btn danger" onclick="Devices.act(${d.id},'revoke')">Révoquer</button>` : `<button class="btn primary" onclick="Devices.act(${d.id},'approve')">Approuver</button>`}
         <button class="btn danger" onclick="Devices.remove(${d.id})">Supprimer</button></div>`}`;
   },
+  subRow(sd, ro) {
+    const dis = ro ? 'disabled' : '';
+    return `<div class="fwd-row sub"><input class="s-name" value="${App.esc(sd.name)}" placeholder="Processeur LED" ${dis}><input class="s-ip" value="${App.esc(sd.ip)}" placeholder="192.168.0.10" ${dis}><input class="s-port" type="number" value="${sd.port || ''}" placeholder="37564" ${dis}>${ro ? '<span></span>' : '<button class="btn small danger" onclick="this.parentNode.remove()">×</button>'}</div>`;
+  },
+  addSub() { document.getElementById('subs').insertAdjacentHTML('beforeend', Devices.subRow({ name: '', ip: '', port: '' }, false)); },
   fwdRow(f, i, ro) {
     const dis = ro ? 'disabled' : '';
     return `<div class="fwd-row"><input class="f-name" value="${App.esc(f.name)}" ${dis}><select class="f-proto" ${dis}><option ${f.proto === 'tcp' ? 'selected' : ''}>tcp</option><option ${f.proto === 'udp' ? 'selected' : ''}>udp</option></select>
@@ -227,15 +238,16 @@ const Devices = {
   addFwd() { document.getElementById('fwds').insertAdjacentHTML('beforeend', Devices.fwdRow({ name: '', proto: 'tcp', listen: '', target: '' }, 0, false)); },
   async saveConfig(id) {
     const forwards = [...document.querySelectorAll('#fwds .fwd-row')].map(r => ({ name: r.querySelector('.f-name').value.trim(), proto: r.querySelector('.f-proto').value, listen: +r.querySelector('.f-listen').value, target: r.querySelector('.f-target').value.trim() }));
-    const cfg = { name: App.val('c-name'), heartbeat_seconds: +App.val('c-hb'), processor: { ip: App.val('c-pip').trim(), port: +App.val('c-pport') }, forwards, update: { enabled: document.getElementById('c-upd').checked, check_hours: +App.val('c-updh') } };
+    const sub_devices = [...document.querySelectorAll('#subs .fwd-row.sub')].map(r => ({ name: r.querySelector('.s-name').value.trim(), ip: r.querySelector('.s-ip').value.trim(), port: +r.querySelector('.s-port').value })).filter(sd => sd.ip);
+    const cfg = { name: App.val('c-name'), heartbeat_seconds: +App.val('c-hb'), sub_devices, forwards, update: { enabled: document.getElementById('c-upd').checked, check_hours: +App.val('c-updh') } };
     await App.api('PUT', `/api/devices/${id}/config`, cfg); App.toast('Configuration enregistrée, appliquée au prochain heartbeat'); Devices.refresh();
   },
   async act(id, what) {
-    if (what === 'revoke' && !App.confirm('Révoquer cet écran ? Il sera retiré du réseau privé et devra être ré-approuvé.')) return;
-    await App.api('POST', `/api/devices/${id}/${what}`); App.toast({ approve: 'Écran approuvé : il rejoint le réseau dans quelques secondes', reject: 'Écran refusé', revoke: 'Écran révoqué' }[what]); Devices.refresh();
+    if (what === 'revoke' && !App.confirm('Révoquer cet appareil ? Il sera retiré du réseau privé et devra être ré-approuvé.')) return;
+    await App.api('POST', `/api/devices/${id}/${what}`); App.toast({ approve: 'Appareil approuvé : il rejoint le réseau dans quelques secondes', reject: 'Appareil refusé', revoke: 'Appareil révoqué' }[what]); Devices.refresh();
   },
   async cmd(id, kind) { await App.api('POST', `/api/devices/${id}/command`, { kind }); App.toast('Commande envoyée, exécutée au prochain heartbeat'); setTimeout(() => Devices.loadCmds(id), 1500); },
-  async remove(id) { if (!App.confirm('Supprimer définitivement cet écran du projet ?')) return; await App.api('DELETE', `/api/devices/${id}`); Devices.open.delete(id); Devices.refresh(); },
+  async remove(id) { if (!App.confirm('Supprimer définitivement cet appareil du projet ?')) return; await App.api('DELETE', `/api/devices/${id}`); Devices.open.delete(id); Devices.refresh(); },
 };
 
 /* ---------- Actions ---------- */
@@ -255,8 +267,8 @@ const Actions = {
     const a = Actions.list.find(x => x.id === id) || { kind: 'hub', method: 'GET', headers: {}, timeout_seconds: 10 };
     App.modal(`<h2>${id ? 'Modifier' : 'Nouvelle'} action</h2>
       <label>Nom <input id="a-name" value="${App.esc(a.name || '')}"></label>
-      <div class="row"><label>Exécutée par <select id="a-kind" onchange="document.getElementById('a-dev-l').hidden=this.value!=='agent'"><option value="hub" ${a.kind === 'hub' ? 'selected' : ''}>le hub (API externe)</option><option value="agent" ${a.kind === 'agent' ? 'selected' : ''}>l'agent d'un écran (réseau local)</option></select></label>
-      <label id="a-dev-l" ${a.kind === 'agent' ? '' : 'hidden'}>Écran <select id="a-dev">${Actions.devices.filter(d => d.status === 'approved').map(d => `<option value="${d.id}" ${a.device_id === d.id ? 'selected' : ''}>${App.esc(d.name)}</option>`).join('')}</select></label></div>
+      <div class="row"><label>Exécutée par <select id="a-kind" onchange="document.getElementById('a-dev-l').hidden=this.value!=='agent'"><option value="hub" ${a.kind === 'hub' ? 'selected' : ''}>le hub (API externe)</option><option value="agent" ${a.kind === 'agent' ? 'selected' : ''}>l'agent d'un appareil (réseau local)</option></select></label>
+      <label id="a-dev-l" ${a.kind === 'agent' ? '' : 'hidden'}>Appareil <select id="a-dev">${Actions.devices.filter(d => d.status === 'approved').map(d => `<option value="${d.id}" ${a.device_id === d.id ? 'selected' : ''}>${App.esc(d.name)}</option>`).join('')}</select></label></div>
       <div class="row"><label>Méthode <select id="a-method">${['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map(m => `<option ${a.method === m ? 'selected' : ''}>${m}</option>`).join('')}</select></label><label>Délai (s) <input id="a-timeout" type="number" value="${a.timeout_seconds}"></label></div>
       <label>URL <input id="a-url" value="${App.esc(a.url || '')}" placeholder="http://192.168.0.10/api/..."></label>
       <label>En-têtes (JSON) <textarea id="a-headers">${App.esc(JSON.stringify(a.headers || {}, null, 1))}</textarea></label>
@@ -328,7 +340,7 @@ const Settings = {
   async save() { await App.api('PUT', `/api/projects/${PROJECT.id}`, { name: App.val('p-name'), timezone: App.val('p-tz') }); App.toast('Projet enregistré'); },
   async rotate() { if (!App.confirm('Régénérer la clé ? L\'ancienne cessera d\'accepter de nouveaux écrans.')) return; const r = await App.api('POST', `/api/projects/${PROJECT.id}/rotate-key`); location.reload(); },
   async saveMembers() { const ids = [...document.querySelectorAll('.m-user:checked:not([disabled])')].map(c => +c.value); await App.api('PUT', `/api/projects/${PROJECT.id}/members`, ids); App.toast('Membres enregistrés'); },
-  async remove() { if (!App.confirm(`Supprimer le projet « ${PROJECT.name} » et révoquer tous ses écrans ?`)) return; await App.api('DELETE', `/api/projects/${PROJECT.id}`); location.href = '/'; },
+  async remove() { if (!App.confirm(`Supprimer le projet « ${PROJECT.name} » et révoquer tous ses appareils ?`)) return; await App.api('DELETE', `/api/projects/${PROJECT.id}`); location.href = '/'; },
 };
 
 /* ---------- Utilisateurs ---------- */

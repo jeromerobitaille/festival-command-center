@@ -36,13 +36,26 @@ const localBase = "http://127.0.0.1:47632"
 
 type snapshot struct {
 	Version       string    `json:"version"`
-	ScreenID      string    `json:"screen_id"`
+	Slug          string    `json:"slug"`
 	Name          string    `json:"name"`
 	Phase         string    `json:"phase"`
 	Message       string    `json:"message"`
 	TailnetIP     string    `json:"tailnet_ip"`
-	ProcessorOK   *bool     `json:"processor_ok"`
+	SubDevices    []struct {
+		Name      string `json:"name"`
+		Reachable bool   `json:"reachable"`
+	} `json:"sub_devices"`
 	LastHeartbeat time.Time `json:"last_heartbeat"`
+}
+
+func (s *snapshot) subsOK() (ok, total int) {
+	for _, d := range s.SubDevices {
+		total++
+		if d.Reachable {
+			ok++
+		}
+	}
+	return
 }
 
 var (
@@ -125,7 +138,7 @@ func onReady() {
 	systray.SetTooltip("Agent Festival Command Center")
 	mStatus = systray.AddMenuItem("Statut : …", "")
 	mIP = systray.AddMenuItem("IP privée : —", "")
-	mProc = systray.AddMenuItem("Processeur : —", "")
+	mProc = systray.AddMenuItem("Sous-appareils : —", "")
 	mMode = systray.AddMenuItem("Mode : …", "")
 	mStatus.Disable()
 	mIP.Disable()
@@ -133,7 +146,7 @@ func onReady() {
 	mMode.Disable()
 	systray.AddSeparator()
 	mPanel = systray.AddMenuItem("Ouvrir le panneau", "Statut détaillé, clé de projet, configuration")
-	mKey = systray.AddMenuItem("Entrer la clé de projet…", "Rattacher cet écran à un projet")
+	mKey = systray.AddMenuItem("Entrer la clé de projet…", "Rattacher cet appareil à un projet")
 	mFolder = systray.AddMenuItem("Ouvrir le dossier de l'agent", "")
 	systray.AddSeparator()
 	mRestart = systray.AddMenuItem("Redémarrer l'agent", "")
@@ -180,7 +193,7 @@ func loop() {
 			systray.SetIcon(icoOffline)
 			mStatus.SetTitle("Statut : agent injoignable")
 			mIP.SetTitle("IP privée : —")
-			mProc.SetTitle("Processeur : —")
+			mProc.SetTitle("Sous-appareils : —")
 			systray.SetTooltip("Agent Festival Command Center — arrêté")
 			mInstall.Show()
 			if installed {
@@ -205,17 +218,15 @@ func loop() {
 				ip = "—"
 			}
 			mIP.SetTitle("IP privée : " + ip)
-			switch {
-			case snap.ProcessorOK == nil:
-				mProc.SetTitle("Processeur : —")
-			case *snap.ProcessorOK:
-				mProc.SetTitle("Processeur : joignable")
-			default:
-				mProc.SetTitle("Processeur : injoignable")
+			okN, total := snap.subsOK()
+			if total == 0 {
+				mProc.SetTitle("Sous-appareils : aucun")
+			} else {
+				mProc.SetTitle(fmt.Sprintf("Sous-appareils : %d/%d joignables", okN, total))
 			}
 			switch snap.Phase {
 			case "online":
-				if snap.ProcessorOK != nil && !*snap.ProcessorOK {
+				if okN < total {
 					systray.SetIcon(icoWarn)
 				} else {
 					systray.SetIcon(icoOnline)

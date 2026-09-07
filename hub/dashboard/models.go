@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -27,15 +28,53 @@ type Project struct {
 
 // DeviceConfig est la configuration poussée à l'agent.
 type DeviceConfig struct {
-	Name             string        `json:"name"`
-	HeartbeatSeconds int           `json:"heartbeat_seconds"`
-	Processor        ProcessorConf `json:"processor"`
-	Forwards         []ForwardConf `json:"forwards"`
-	Update           UpdateConf    `json:"update"`
+	Name             string          `json:"name"`
+	HeartbeatSeconds int             `json:"heartbeat_seconds"`
+	SubDevices       []SubDeviceConf `json:"sub_devices"`
+	Forwards         []ForwardConf   `json:"forwards"`
+	Update           UpdateConf      `json:"update"`
+	// Compatibilité agents ≤ 0.4 : premier sous-appareil, en lecture (config envoyée) et en écriture (proposition reçue).
+	Processor *SubDeviceConf `json:"processor,omitempty"`
 }
-type ProcessorConf struct {
+
+// SubDeviceConf : équipement sur le réseau local de l'appareil (processeur LED, projecteur, automate…).
+type SubDeviceConf struct {
+	Name string `json:"name"`
 	IP   string `json:"ip"`
 	Port int    `json:"port"`
+}
+
+// normalize fusionne l'ancien champ processor et complète les noms.
+func (c *DeviceConfig) normalize() {
+	if c.Processor != nil && c.Processor.IP != "" && len(c.SubDevices) == 0 {
+		name := c.Processor.Name
+		if name == "" {
+			name = "Processeur"
+		}
+		c.SubDevices = []SubDeviceConf{{Name: name, IP: c.Processor.IP, Port: c.Processor.Port}}
+	}
+	c.Processor = nil
+	if c.SubDevices == nil {
+		c.SubDevices = []SubDeviceConf{}
+	}
+	if c.Forwards == nil {
+		c.Forwards = []ForwardConf{}
+	}
+	for i := range c.SubDevices {
+		if c.SubDevices[i].Name == "" {
+			c.SubDevices[i].Name = fmt.Sprintf("sous-appareil %d", i+1)
+		}
+	}
+}
+
+// forAgent : copie envoyée aux agents, avec le champ processor pour les anciennes versions.
+func (c DeviceConfig) forAgent() DeviceConfig {
+	c.normalize()
+	if len(c.SubDevices) > 0 {
+		sd := c.SubDevices[0]
+		c.Processor = &sd
+	}
+	return c
 }
 type ForwardConf struct {
 	Name   string `json:"name"`
@@ -51,7 +90,7 @@ type UpdateConf struct {
 type Device struct {
 	ID            int64           `json:"id"`
 	ProjectID     int64           `json:"project_id"`
-	ScreenID      string          `json:"screen_id"`
+	Slug          string          `json:"slug"`
 	Name          string          `json:"name"`
 	Status        string          `json:"status"`
 	Hostname      string          `json:"hostname"`
@@ -192,15 +231,16 @@ func (s *Server) userCanAccess(u *User, projectID int64) bool {
 	return n > 0
 }
 
-const deviceCols = `id, project_id, screen_id, name, status, hostname, os, arch, agent_version, tailnet_ip, config, config_version, last_heartbeat, last_seen, enrolled_at, approved_at`
+const deviceCols = `id, project_id, slug, name, status, hostname, os, arch, agent_version, tailnet_ip, config, config_version, last_heartbeat, last_seen, enrolled_at, approved_at`
 
 func (s *Server) scanDevice(row interface{ Scan(...any) error }) (*Device, error) {
 	d := &Device{}
 	var cfg, hb string
-	if err := row.Scan(&d.ID, &d.ProjectID, &d.ScreenID, &d.Name, &d.Status, &d.Hostname, &d.OS, &d.Arch, &d.AgentVersion, &d.TailnetIP, &cfg, &d.ConfigVersion, &hb, &d.LastSeen, &d.EnrolledAt, &d.ApprovedAt); err != nil {
+	if err := row.Scan(&d.ID, &d.ProjectID, &d.Slug, &d.Name, &d.Status, &d.Hostname, &d.OS, &d.Arch, &d.AgentVersion, &d.TailnetIP, &cfg, &d.ConfigVersion, &hb, &d.LastSeen, &d.EnrolledAt, &d.ApprovedAt); err != nil {
 		return nil, err
 	}
 	json.Unmarshal([]byte(cfg), &d.Config)
+	d.Config.normalize()
 	if hb == "" {
 		hb = "null"
 	}
@@ -221,7 +261,7 @@ func (s *Server) getDeviceByToken(token string) (*Device, error) {
 	return s.scanDevice(s.db.QueryRow(`SELECT `+deviceCols+` FROM devices WHERE token_hash=?`, hashToken(token)))
 }
 func (s *Server) listDevices(projectID int64) ([]*Device, error) {
-	rows, err := s.db.Query(`SELECT `+deviceCols+` FROM devices WHERE project_id=? ORDER BY status='pending' DESC, screen_id`, projectID)
+	rows, err := s.db.Query(`SELECT `+deviceCols+` FROM devices WHERE project_id=? ORDER BY status='pending' DESC, slug`, projectID)
 	if err != nil {
 		return nil, err
 	}

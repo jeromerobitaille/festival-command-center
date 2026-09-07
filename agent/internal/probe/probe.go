@@ -9,6 +9,7 @@ import (
 )
 
 type Result struct {
+	Name      string  `json:"name,omitempty"`
 	Target    string  `json:"target"`
 	Reachable bool    `json:"reachable"`
 	RTTMS     float64 `json:"rtt_ms"`

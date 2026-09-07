@@ -65,13 +65,14 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 // ---- types partagés avec le portail ----
 
 type DeviceConfig struct {
-	Name             string        `json:"name"`
-	HeartbeatSeconds int           `json:"heartbeat_seconds"`
-	Processor        ProcessorConf `json:"processor"`
-	Forwards         []ForwardConf `json:"forwards"`
-	Update           UpdateConf    `json:"update"`
+	Name             string          `json:"name"`
+	HeartbeatSeconds int             `json:"heartbeat_seconds"`
+	SubDevices       []SubDeviceConf `json:"sub_devices"`
+	Forwards         []ForwardConf   `json:"forwards"`
+	Update           UpdateConf      `json:"update"`
 }
-type ProcessorConf struct {
+type SubDeviceConf struct {
+	Name string `json:"name"`
 	IP   string `json:"ip"`
 	Port int    `json:"port"`
 }
@@ -88,7 +89,7 @@ type UpdateConf struct {
 
 type EnrollRequest struct {
 	ProjectKey   string        `json:"project_key"`
-	ScreenID     string        `json:"screen_id"`
+	Slug         string        `json:"slug"` // identifiant de l'appareil dans le projet
 	Name         string        `json:"name"`
 	Hostname     string        `json:"hostname"`
 	OS           string        `json:"os"`

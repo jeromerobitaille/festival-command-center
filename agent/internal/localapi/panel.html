@@ -20,22 +20,23 @@ textarea{min-height:220px}.row{display:flex;gap:10px}.row>*{flex:1}
 <section class="card">
   <div class="status"><span class="dot" id="dot"></span><b id="phase">…</b></div>
   <dl class="kv">
-    <dt>Écran</dt><dd id="screen">—</dd>
+    <dt>Appareil</dt><dd id="screen">—</dd>
     <dt>IP réseau privé</dt><dd><code id="ip">—</code></dd>
     <dt>Portail</dt><dd id="portal">—</dd>
-    <dt>Processeur Tessera</dt><dd id="proc">—</dd>
+    <dt>Sous-appareils</dt><dd id="proc">—</dd>
     <dt>Dernier heartbeat</dt><dd id="hb">—</dd>
     <dt>Fichier</dt><dd><code id="path"></code></dd>
   </dl>
-  <div class="btnrow"><button class="btn" onclick="post('/api/reload','Configuration relue')">Relire la configuration</button><button class="btn" onclick="post('/api/restart','Redémarrage demandé')">Redémarrer l'agent</button><button class="btn danger" onclick="if(confirm('Oublier l’inscription ? L’écran devra être ré-approuvé dans le portail.'))post('/api/reset','Inscription oubliée')">Réinscrire</button></div>
+  <div class="btnrow"><button class="btn" onclick="post('/api/reload','Configuration relue')">Relire la configuration</button><button class="btn" onclick="post('/api/restart','Redémarrage demandé')">Redémarrer l'agent</button><button class="btn danger" onclick="if(confirm('Oublier l’inscription ? L’appareil devra être ré-approuvé dans le portail.'))post('/api/reset','Inscription oubliée')">Réinscrire</button></div>
 </section>
 <section class="card">
-  <h2>Rattacher cet écran à un projet</h2>
-  <p class="muted small">La clé se trouve dans le portail, onglet Configuration du projet. Après enregistrement, l'écran apparaîtra en attente d'approbation dans l'onglet Écrans.</p>
+  <h2>Rattacher cet appareil à un projet</h2>
+  <p class="muted small">La clé se trouve dans le portail, onglet Configuration du projet. Après enregistrement, l'appareil apparaîtra en attente d'approbation dans l'onglet Appareils.</p>
   <label>Portail <input id="f-portal" placeholder="https://panel.veam.ca"></label>
   <label>Clé de projet <input id="f-key" placeholder="fcc_…"></label>
-  <div class="row"><label>Identifiant de l'écran <input id="f-id" placeholder="ecran-01"></label><label>Nom affiché <input id="f-name" placeholder="Place des Festivals - Nord"></label></div>
-  <label>IP du processeur Tessera (facultatif) <input id="f-proc" placeholder="192.168.0.10"></label>
+  <div class="row"><label>Identifiant de l'appareil <input id="f-id" placeholder="ecran-01"></label><label>Nom affiché <input id="f-name" placeholder="Place des Festivals - Nord"></label></div>
+  <p class="muted small">Sous-appareil branché sur le réseau local de cet appareil (facultatif, d'autres pourront être ajoutés dans le portail) :</p>
+  <div class="row"><label>Nom <input id="f-subname" placeholder="Processeur LED"></label><label>IP <input id="f-proc" placeholder="192.168.0.10"></label><label>Port <input id="f-subport" type="number" placeholder="37564"></label></div>
   <button class="btn primary" onclick="saveProject()">Enregistrer et s'inscrire</button>
 </section>
 <section class="card">
@@ -51,14 +52,14 @@ const $=id=>document.getElementById(id);
 function toast(m){const t=$('toast');t.textContent=m;t.hidden=false;setTimeout(()=>t.hidden=true,2500)}
 async function post(url,msg,body,method){const r=await fetch(url,{method:method||'POST',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error||r.statusText)}if(msg)toast(msg);setTimeout(refresh,800)}
 async function refresh(){try{const s=await (await fetch('/api/status')).json();
- $('ver').textContent='v'+s.version;$('phase').textContent=s.message||s.phase;$('screen').textContent=(s.name?s.name+' · ':'')+(s.screen_id||'—');$('ip').textContent=s.tailnet_ip||'—';$('portal').textContent=(s.portal_url||'—')+(s.has_project_key?'':'  (aucune clé de projet)');$('path').textContent=s.config_path;
- $('proc').textContent=s.processor_ok==null?'—':(s.processor_ok?'joignable':'injoignable')+' · '+s.processor_addr;$('hb').textContent=s.last_heartbeat&&!s.last_heartbeat.startsWith('0001')?new Date(s.last_heartbeat).toLocaleTimeString('fr-CA'):'—';
+ $('ver').textContent='v'+s.version;$('phase').textContent=s.message||s.phase;$('screen').textContent=(s.name?s.name+' · ':'')+(s.slug||'—');$('ip').textContent=s.tailnet_ip||'—';$('portal').textContent=(s.portal_url||'—')+(s.has_project_key?'':'  (aucune clé de projet)');$('path').textContent=s.config_path;
+ $('proc').textContent=(s.sub_devices&&s.sub_devices.length)?s.sub_devices.map(d=>d.name+' '+(d.reachable?'joignable '+d.rtt_ms.toFixed(1)+' ms':'injoignable')+' ('+d.target+')').join(' · '):'—';$('hb').textContent=s.last_heartbeat&&!s.last_heartbeat.startsWith('0001')?new Date(s.last_heartbeat).toLocaleTimeString('fr-CA'):'—';
  const d=$('dot');d.className='dot '+({online:'ok',pending:'warn',connecting:'warn',enrolling:'warn',error:'ko','no-key':'ko'}[s.phase]||'');
- if(!$('f-portal').value)$('f-portal').value=s.portal_url||'';if(!$('f-id').value)$('f-id').value=s.screen_id||'';if(!$('f-name').value)$('f-name').value=s.name||'';
+ if(!$('f-portal').value)$('f-portal').value=s.portal_url||'';if(!$('f-id').value)$('f-id').value=s.slug||'';if(!$('f-name').value)$('f-name').value=s.name||'';
 }catch(e){$('phase').textContent='agent injoignable (service arrêté ?)';$('dot').className='dot ko'}}
 async function loadToml(){const c=await (await fetch('/api/config')).json();$('toml').value=c.toml;$('tomlerr').textContent=''}
 async function saveToml(){try{await post('/api/config','Fichier enregistré, configuration relue',{toml:$('toml').value},'PUT');$('tomlerr').textContent=''}catch(e){$('tomlerr').textContent=e.message}}
-async function saveProject(){try{await post('/api/project','Enregistré : approuver l’écran dans le portail',{portal_url:$('f-portal').value,project_key:$('f-key').value,screen_id:$('f-id').value,name:$('f-name').value,processor_ip:$('f-proc').value});$('f-key').value='';loadToml()}catch(e){toast('Erreur : '+e.message)}}
+async function saveProject(){try{await post('/api/project','Enregistré : approuver l’écran dans le portail',{portal_url:$('f-portal').value,project_key:$('f-key').value,device_id:$('f-id').value,name:$('f-name').value,sub_name:$('f-subname').value,sub_ip:$('f-proc').value,sub_port:+$('f-subport').value||0});$('f-key').value='';loadToml()}catch(e){toast('Erreur : '+e.message)}}
 refresh();loadToml();setInterval(refresh,5000);
 if(location.hash==='#key')$('f-key').focus();
 </script></body></html>

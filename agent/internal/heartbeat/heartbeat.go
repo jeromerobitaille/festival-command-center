@@ -4,12 +4,12 @@ package heartbeat
 import "time"
 
 type Payload struct {
-	ScreenID      string    `json:"screen_id"`
-	ScreenName    string    `json:"screen_name"`
+	Slug          string    `json:"slug"`
+	Name          string    `json:"name"`
 	AgentVersion  string    `json:"agent_version"`
 	Timestamp     time.Time `json:"timestamp"`
 	TailnetIP     string    `json:"tailnet_ip"`
-	Processor     any       `json:"processor"`
+	SubDevices    any       `json:"sub_devices"`
 	Forwards      any       `json:"forwards"`
 	Peers         any       `json:"peers"`
 	System        any       `json:"system"`

@@ -18,12 +18,16 @@ const DefaultPortalURL = "https://panel.veam.ca"
 const DefaultLocalAddr = "127.0.0.1:47632"
 
 type Config struct {
-	Portal    Portal    `toml:"portal"`
-	Screen    Screen    `toml:"screen"`
-	Processor Processor `toml:"processor"`
-	Forwards  []Forward `toml:"forward"`
-	Agent     Agent     `toml:"agent"`
-	Update    Update    `toml:"update"`
+	Portal     Portal      `toml:"portal"`
+	Device     Device      `toml:"device"`
+	SubDevices []SubDevice `toml:"sub_device"`
+	Forwards   []Forward   `toml:"forward"`
+	Agent      Agent       `toml:"agent"`
+	Update     Update      `toml:"update"`
+
+	// Anciennes clés (agent ≤ 0.4), fusionnées dans Device / SubDevices au chargement.
+	Screen    Device    `toml:"screen"`
+	Processor SubDevice `toml:"processor"`
 
 	Path string `toml:"-"`
 }
@@ -33,14 +37,16 @@ type Portal struct {
 	ProjectKey string `toml:"project_key"`
 }
 
-type Screen struct {
+// Device : identité de cet appareil dans le projet.
+type Device struct {
 	ID   string `toml:"id"`
 	Name string `toml:"name"`
 }
 
-// Processor et Forward sont la proposition initiale envoyée au portail à l'inscription.
-// Après approbation, la configuration du portail fait foi.
-type Processor struct {
+// SubDevice : équipement branché sur le réseau local de l'appareil (processeur LED, projecteur, automate…).
+// Avec Forward, c'est la proposition initiale envoyée au portail à l'inscription ; ensuite le portail fait foi.
+type SubDevice struct {
+	Name string `toml:"name"`
 	IP   string `toml:"ip"`
 	Port int    `toml:"port"`
 }
@@ -107,16 +113,36 @@ func (c *Config) applyDefaults() {
 		c.Portal.URL = DefaultPortalURL
 	}
 	c.Portal.ProjectKey = strings.TrimSpace(c.Portal.ProjectKey)
-	if c.Screen.ID == "" {
+	// compatibilité : [screen] → [device], [processor] → [[sub_device]]
+	if c.Device.ID == "" {
+		c.Device.ID = c.Screen.ID
+	}
+	if c.Device.Name == "" {
+		c.Device.Name = c.Screen.Name
+	}
+	if c.Processor.IP != "" {
+		name := c.Processor.Name
+		if name == "" {
+			name = "Processeur"
+		}
+		port := c.Processor.Port
+		if port == 0 {
+			port = 37564 // ancien défaut de [processor]
+		}
+		c.SubDevices = append([]SubDevice{{Name: name, IP: c.Processor.IP, Port: port}}, c.SubDevices...)
+	}
+	if c.Device.ID == "" {
 		h, _ := os.Hostname()
-		c.Screen.ID = h
+		c.Device.ID = h
 	}
-	c.Screen.ID = Slugify(c.Screen.ID)
-	if c.Screen.Name == "" {
-		c.Screen.Name = c.Screen.ID
+	c.Device.ID = Slugify(c.Device.ID)
+	if c.Device.Name == "" {
+		c.Device.Name = c.Device.ID
 	}
-	if c.Processor.Port == 0 {
-		c.Processor.Port = 37564
+	for i := range c.SubDevices {
+		if c.SubDevices[i].Name == "" {
+			c.SubDevices[i].Name = fmt.Sprintf("sous-appareil %d", i+1)
+		}
 	}
 	if c.Agent.LocalAddr == "" {
 		c.Agent.LocalAddr = DefaultLocalAddr
@@ -130,9 +156,13 @@ func (c *Config) applyDefaults() {
 		}
 		c.Forwards[i].Proto = strings.ToLower(c.Forwards[i].Proto)
 	}
-	// Forward par défaut vers le processeur si rien n'est déclaré.
-	if len(c.Forwards) == 0 && c.Processor.IP != "" {
-		c.Forwards = []Forward{{Name: "tessera-remote", Proto: "tcp", Listen: c.Processor.Port, Target: net.JoinHostPort(c.Processor.IP, fmt.Sprint(c.Processor.Port))}}
+	// Sans forward déclaré : un forward TCP par sous-appareil qui a un port.
+	if len(c.Forwards) == 0 {
+		for _, sd := range c.SubDevices {
+			if sd.IP != "" && sd.Port > 0 {
+				c.Forwards = append(c.Forwards, Forward{Name: Slugify(sd.Name), Proto: "tcp", Listen: sd.Port, Target: net.JoinHostPort(sd.IP, fmt.Sprint(sd.Port))})
+			}
+		}
 	}
 }
 
@@ -141,11 +171,16 @@ func (c *Config) validate() error {
 		return fmt.Errorf("portal.url invalide : %q", c.Portal.URL)
 	}
 	// project_key peut être vide : l'agent démarre et attend qu'on la saisisse (panneau local).
-	if c.Screen.ID == "" {
-		return fmt.Errorf("screen.id est requis")
+	if c.Device.ID == "" {
+		return fmt.Errorf("device.id est requis")
 	}
-	if c.Processor.IP != "" && net.ParseIP(c.Processor.IP) == nil {
-		return fmt.Errorf("processor.ip invalide : %q", c.Processor.IP)
+	for _, sd := range c.SubDevices {
+		if sd.IP == "" || net.ParseIP(sd.IP) == nil {
+			return fmt.Errorf("sub_device %q : ip invalide %q", sd.Name, sd.IP)
+		}
+		if sd.Port <= 0 || sd.Port > 65535 {
+			return fmt.Errorf("sub_device %q : port requis (1-65535)", sd.Name)
+		}
 	}
 	return ValidateForwards(c.Forwards)
 }

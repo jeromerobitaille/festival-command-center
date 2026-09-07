@@ -47,6 +47,7 @@ textarea { min-height:70px; font-family:ui-monospace,Menlo,monospace; font-size:
 .device .body { border-top:1px solid var(--line); padding:14px; display:grid; grid-template-columns:1fr 1fr; gap:18px } @media (max-width:900px){ .device .body { grid-template-columns:1fr } }
 .kv { display:grid; grid-template-columns:130px 1fr; gap:4px 10px; font-size:13px } .kv dt { color:var(--muted) } .kv dd { margin:0; overflow-wrap:anywhere }
 .fwd-row { display:grid; grid-template-columns:1.2fr .6fr .7fr 1.4fr auto; gap:6px; align-items:center; margin-bottom:6px } .fwd-row input, .fwd-row select { margin:0 }
+.fwd-row.sub { grid-template-columns:1.2fr 1.2fr .7fr auto }
 .cmds { font-size:12px; max-height:180px; overflow:auto } .cmds div { padding:4px 0; border-bottom:1px solid var(--line) }
 .btnrow { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px }
 /* tableau de bord */

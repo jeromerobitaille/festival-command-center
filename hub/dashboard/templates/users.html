@@ -9,5 +9,5 @@
 {{if ne .ID $.User.ID}}<button class="btn small danger" onclick="Users.remove({{.ID}}, '{{.Username}}')">Supprimer</button>{{end}}</td></tr>
 {{end}}
 </tbody></table>
-<p class="muted small">Un <b>admin</b> gère tout : projets, écrans, actions, utilisateurs. Un <b>user</b> voit les projets dont il est membre, peut lancer les actions et consulter les écrans, sans rien modifier.</p>
+<p class="muted small">Un <b>admin</b> gère tout : projets, appareils, actions, utilisateurs. Un <b>user</b> voit les projets dont il est membre, peut lancer les actions et consulter les appareils, sans rien modifier.</p>
 {{template "foot" .}}

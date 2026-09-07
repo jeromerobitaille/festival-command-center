@@ -1,6 +1,6 @@
 # Festival Command Center
 
-Supervision et contrôle à distance des écrans LED du festival (laptop + processeur Brompton Tessera par écran).
+Supervision et contrôle à distance des appareils LED du festival (laptop + processeur Brompton Tessera par écran).
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — décisions techniques (tsnet + Headscale, RustDesk, Go).
 - [agent/](agent/) — l'agent installé sur chaque laptop (phase 1, fonctionnel).

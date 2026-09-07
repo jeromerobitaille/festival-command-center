@@ -1,18 +1,19 @@
 # Configuration locale de l'agent Festival Command Center.
 # Copier en agent.toml à côté du binaire, puis : agent check  ·  agent install
-# Tout le reste (nom, processeur, forwards, mises à jour) se règle ensuite dans le portail.
+# Tout le reste (nom, sous-appareils, forwards, mises à jour) se règle ensuite dans le portail.
 
 [portal]
 url         = "https://panel.veam.ca"     # portail (onglet Configuration du projet → clé)
 project_key = "fcc_CHANGEZ-MOI"
 
-[screen]
+[device]
 id   = "ecran-01"                         # identifiant unique dans le projet (a-z, 0-9, -) ; défaut : nom d'hôte
 name = "Place des Festivals - Nord"       # nom proposé, modifiable dans le portail
 
-# Proposition initiale, envoyée au portail à l'inscription (facultatif).
-[processor]
-ip   = "192.168.0.10"                      # processeur Tessera branché en direct
+# Sous-appareils sur le réseau local de cet appareil, proposés au portail à l'inscription (facultatif, répétable).
+[[sub_device]]
+name = "Processeur LED"
+ip   = "192.168.0.10"
 port = 37564
 
 [agent]

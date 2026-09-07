@@ -13,7 +13,7 @@
   {{if .Project}}
   <nav class="tabs">
     <a href="/p/{{.Project.Slug}}" class="{{if eq .Page "dashboard"}}on{{end}}">Tableau de bord</a>
-    <a href="/p/{{.Project.Slug}}/devices" class="{{if eq .Page "devices"}}on{{end}}">Écrans</a>
+    <a href="/p/{{.Project.Slug}}/devices" class="{{if eq .Page "devices"}}on{{end}}">Appareils</a>
     <a href="/p/{{.Project.Slug}}/actions" class="{{if eq .Page "actions"}}on{{end}}">Actions</a>
     <a href="/p/{{.Project.Slug}}/automations" class="{{if eq .Page "automations"}}on{{end}}">Automatisations</a>
     {{if .User.IsAdmin}}<a href="/p/{{.Project.Slug}}/settings" class="{{if eq .Page "settings"}}on{{end}}">Configuration</a>{{end}}
