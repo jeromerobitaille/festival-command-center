@@ -21,12 +21,6 @@ builds:
     goarch: [amd64]
     ldflags: ["-s -w -H=windowsgui -X main.version={{ .Version }}"]
 
-# Après les builds : installateur Windows (NSIS, installé sur le runner) joint à la release.
-after:
-  hooks:
-    - cmd: installer/build.sh {{ .Version }}
-      output: true
-
 archives:
   - id: binaries
     formats: [binary]                       # un binaire nu par plateforme (mise à jour automatique)
@@ -52,8 +46,6 @@ release:
   github:
     owner: jeromerobitaille
     name: festival-command-center
-  extra_files:
-    - glob: dist/installer/*.exe
   name_template: "agent {{ .Version }}"
   header: |
     Binaires de l'agent. Les laptops se mettent à jour seuls (vérification signature + SHA-256).

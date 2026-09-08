@@ -32,3 +32,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+      - name: Installateur Windows (NSIS) joint à la release
+        working-directory: agent
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          installer/build.sh "$VERSION"
+          gh release upload "$GITHUB_REF_NAME" dist/installer/*.exe --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
