@@ -7,6 +7,7 @@ require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/jchv/go-webview2 v0.0.0-20260205173254-56598839c808
 	github.com/kardianos/service v1.3.0
+	github.com/lxn/walk v0.0.0-20210112085537-c389da54e794
 	github.com/shirou/gopsutil/v4 v4.26.8
 	golang.org/x/mod v0.37.0
 	golang.org/x/sys v0.47.0
@@ -35,6 +36,7 @@ require (
 	github.com/jsimonetti/rtnetlink v1.4.1 // indirect
 	github.com/klauspost/compress v1.19.1 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
+	github.com/lxn/win v0.0.0-20210218163916-a377121e959e // indirect
 	github.com/mdlayher/netlink v1.7.3-0.20250113171957-fbb4dce95f42 // indirect
 	github.com/mdlayher/socket v0.5.0 // indirect
 	github.com/mitchellh/go-ps v1.0.0 // indirect
@@ -63,5 +65,6 @@ require (
 	golang.org/x/time v0.15.0 // indirect
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
 	golang.zx2c4.com/wireguard/windows v0.5.3 // indirect
+	gopkg.in/Knetic/govaluate.v3 v3.0.0 // indirect
 	gvisor.dev/gvisor v0.0.0-20260224225140-573d5e7127a8 // indirect
 )

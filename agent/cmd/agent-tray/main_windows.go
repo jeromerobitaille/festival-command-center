@@ -38,6 +38,7 @@ type snapshot struct {
 	Version       string    `json:"version"`
 	Slug          string    `json:"slug"`
 	Name          string    `json:"name"`
+	PortalURL     string    `json:"portal_url"`
 	Phase         string    `json:"phase"`
 	Message       string    `json:"message"`
 	TailnetIP     string    `json:"tailnet_ip"`
@@ -145,8 +146,8 @@ func onReady() {
 	mProc.Disable()
 	mMode.Disable()
 	systray.AddSeparator()
-	mPanel = systray.AddMenuItem("Ouvrir le panneau", "Statut détaillé, clé de projet, configuration")
-	mKey = systray.AddMenuItem("Entrer la clé de projet…", "Rattacher cet appareil à un projet")
+	mPanel = systray.AddMenuItem("Configuration…", "Statut détaillé, clé de projet, fichier de configuration")
+	mKey = systray.AddMenuItem("Panneau web (avancé)", "Le même panneau dans le navigateur")
 	mFolder = systray.AddMenuItem("Ouvrir le dossier de l'agent", "")
 	systray.AddSeparator()
 	mRestart = systray.AddMenuItem("Redémarrer l'agent", "")

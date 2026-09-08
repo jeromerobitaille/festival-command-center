@@ -11,6 +11,11 @@ import (
 	"path/filepath"
 )
 
+func discPNG(fill color.RGBA) []byte {
+	ico := disc(fill)
+	return ico[22:] // le PNG encapsulé suit l'en-tête ICO de 22 octets
+}
+
 func disc(fill color.RGBA) []byte {
 	const n = 32
 	img := image.NewRGBA(image.Rect(0, 0, n, n))
@@ -59,4 +64,5 @@ func main() {
 	os.WriteFile(filepath.Join(dir, "online.ico"), disc(color.RGBA{61, 220, 132, 255}), 0o644)
 	os.WriteFile(filepath.Join(dir, "warn.ico"), disc(color.RGBA{255, 176, 32, 255}), 0o644)
 	os.WriteFile(filepath.Join(dir, "offline.ico"), disc(color.RGBA{255, 92, 92, 255}), 0o644)
+	os.WriteFile(filepath.Join(dir, "app.png"), discPNG(color.RGBA{91, 156, 255, 255}), 0o644) // icône de l'application (bleu)
 }

@@ -17,6 +17,8 @@ jobs:
         with:
           go-version-file: agent/go.mod
           cache-dependency-path: agent/go.sum
+      - name: Installer NSIS (installateur Windows)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq nsis
       - name: Vérifier que la clé de signature est configurée
         run: test -n "$RELEASE_SIGNING_KEY" || { echo "secret RELEASE_SIGNING_KEY manquant"; exit 1; }
         env:
