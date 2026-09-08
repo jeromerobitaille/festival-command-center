@@ -152,7 +152,7 @@ const Dash = {
   grid: null, editing: false, widgets: [], data: null, dashboards: [], current: null,
   async init() {
     GridStack.renderCB = (el, w) => { el.innerHTML = w.content || ''; };
-    Dash.grid = GridStack.init({ column: 12, cellHeight: 64, margin: 6, float: true, disableDrag: true, disableResize: true, animate: false }, '#grid');
+    Dash.grid = GridStack.init({ column: 12, cellHeight: 64, margin: 6, float: true, disableDrag: true, disableResize: true, animate: false, columnOpts: { breakpoints: [{ w: 768, c: 1 }, { w: 1024, c: 6 }] } }, '#grid');
     Dash.grid.on('change', (e, items) => items.forEach(it => { const w = Dash.widgets.find(x => x.id === it.el.dataset.id); if (w) Object.assign(w, { x: it.x, y: it.y, w: it.w, h: it.h }); }));
     const nb = document.getElementById('dash-new'); if (nb) nb.onclick = Dash.create;
     await Dash.loadList(); Dash.refresh(); setInterval(Dash.refresh, 10000);
