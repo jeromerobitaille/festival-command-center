@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/festival/command-center/agent/internal/scan"
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/host"
 	"github.com/shirou/gopsutil/v4/mem"
@@ -21,6 +22,11 @@ type Info struct {
 	UptimeSeconds uint64  `json:"uptime_seconds"`
 	CPUPercent    float64 `json:"cpu_percent"`
 	MemPercent    float64 `json:"mem_percent"`
+	// Réseau local de la machine, distinct de l'adresse du réseau privé : c'est ce
+	// sous-réseau qui porte les sous-appareils, et que le scan parcourt.
+	LANIP    string `json:"lan_ip,omitempty"`
+	LANCIDR  string `json:"lan_cidr,omitempty"`
+	LANIface string `json:"lan_iface,omitempty"`
 }
 
 func Collect(ctx context.Context) Info {
@@ -34,6 +40,9 @@ func Collect(ctx context.Context) Info {
 	}
 	if vm, err := mem.VirtualMemoryWithContext(ctx); err == nil {
 		i.MemPercent = vm.UsedPercent
+	}
+	if n, iface, err := scan.LocalNet(); err == nil {
+		i.LANIP, i.LANCIDR, i.LANIface = n.IP.String(), n.String(), iface
 	}
 	return i
 }

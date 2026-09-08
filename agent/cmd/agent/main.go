@@ -28,6 +28,7 @@ import (
 	"github.com/festival/command-center/agent/internal/localapi"
 	"github.com/festival/command-center/agent/internal/portal"
 	"github.com/festival/command-center/agent/internal/probe"
+	"github.com/festival/command-center/agent/internal/scan"
 	"github.com/festival/command-center/agent/internal/status"
 	"github.com/festival/command-center/agent/internal/sysinfo"
 	"github.com/festival/command-center/agent/internal/tunnel"
@@ -672,6 +673,31 @@ func (a *agentState) runCommand(ctx context.Context, c portal.Command) {
 			}
 		}
 		result = strings.Join(parts, " ; ")
+	case "scan":
+		var req struct {
+			CIDR  string `json:"cidr"`
+			Ports []int  `json:"ports"`
+		}
+		if len(c.Payload) > 0 {
+			if err := jsonUnmarshal(c.Payload, &req); err != nil {
+				ok, result = false, "payload invalide : "+err.Error()
+				break
+			}
+		}
+		// Le balayage peut durer : borné ici pour ne pas retenir la boucle de commandes.
+		sctx, cancel := context.WithTimeout(ctx, 4*time.Minute)
+		res, err := scan.Run(sctx, req.CIDR, req.Ports, 0)
+		cancel()
+		if err != nil {
+			ok, result = false, err.Error()
+			break
+		}
+		b, err := jsonMarshal(res)
+		if err != nil {
+			ok, result = false, "résultat illisible : "+err.Error()
+			break
+		}
+		result = string(b)
 	case "update":
 		v, err := applyUpdate(ctx, a.cfg, false)
 		if err != nil {
