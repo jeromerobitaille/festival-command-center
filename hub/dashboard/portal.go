@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -24,9 +25,12 @@ func (s *Server) registerPortal(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", s.requireUser(s.pageProjects))
 	mux.HandleFunc("GET /admin/users", s.requireAdmin(func(w http.ResponseWriter, r *http.Request) {
 		users, _ := s.listUsers()
-		s.render(w, "users.html", s.base(r, map[string]any{"Users": users, "Title": "Utilisateurs"}))
+		if users == nil {
+			users = []User{}
+		}
+		s.render(w, "users.html", s.base(r, map[string]any{"Users": users, "Title": "Utilisateurs", "Subtitle": "Comptes et rôles du portail", "Page": "users"}))
 	}))
-	for _, page := range []string{"dashboard", "devices", "actions", "automations", "settings"} {
+	for _, page := range []string{"dashboard", "devices", "actions", "automations", "notifications", "settings"} {
 		page := page
 		path := "GET /p/{slug}"
 		if page != "dashboard" {
@@ -45,18 +49,38 @@ func (s *Server) registerPortal(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/users/{id}/password", s.requireAdmin(s.apiResetPassword))
 
 	mux.HandleFunc("GET /api/projects", s.requireUser(func(w http.ResponseWriter, r *http.Request) {
-		p, _ := s.listProjectsFor(currentUser(r))
-		if p == nil {
-			p = []*Project{}
+		ps, _ := s.listProjectsFor(currentUser(r))
+		type row struct {
+			*Project
+			Devices int `json:"devices"`
+			Online  int `json:"online"`
+			Pending int `json:"pending"`
 		}
-		writeJSON(w, p)
+		out := []row{}
+		for _, p := range ps {
+			d, o, pe := s.projectStats(p)
+			out = append(out, row{p, d, o, pe})
+		}
+		writeJSON(w, out)
 	}))
 	mux.HandleFunc("POST /api/projects", s.requireAdmin(s.apiCreateProject))
 	mux.HandleFunc("GET /api/projects/{id}", s.requireUser(s.withProject(s.apiGetProject)))
 	mux.HandleFunc("PUT /api/projects/{id}", s.requireAdmin(s.withProject(s.apiUpdateProject)))
 	mux.HandleFunc("DELETE /api/projects/{id}", s.requireAdmin(s.withProject(s.apiDeleteProject)))
 	mux.HandleFunc("POST /api/projects/{id}/rotate-key", s.requireAdmin(s.withProject(s.apiRotateKey)))
-	mux.HandleFunc("PUT /api/projects/{id}/dashboard", s.requireAdmin(s.withProject(s.apiSaveDashboard)))
+	mux.HandleFunc("GET /api/projects/{id}/dashboards", s.requireUser(s.withProject(func(w http.ResponseWriter, r *http.Request, p *Project) {
+		d, _ := s.listDashboards(p.ID)
+		writeJSON(w, d)
+	})))
+	mux.HandleFunc("POST /api/projects/{id}/dashboards", s.requireAdmin(s.withProject(s.apiCreateDashboard)))
+	mux.HandleFunc("PUT /api/dashboards/{id}", s.requireAdmin(s.apiUpdateDashboard))
+	mux.HandleFunc("DELETE /api/dashboards/{id}", s.requireAdmin(s.apiDeleteDashboard))
+	mux.HandleFunc("GET /api/projects/{id}/events", s.requireUser(s.withProject(func(w http.ResponseWriter, r *http.Request, p *Project) {
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+		ev, _ := s.listEvents(p.ID, limit, after)
+		writeJSON(w, ev)
+	})))
 	mux.HandleFunc("GET /api/projects/{id}/members", s.requireAdmin(s.withProject(s.apiListMembers)))
 	mux.HandleFunc("PUT /api/projects/{id}/members", s.requireAdmin(s.withProject(s.apiSetMembers)))
 
@@ -100,10 +124,36 @@ func (s *Server) registerPortal(mux *http.ServeMux) {
 }
 
 func (s *Server) base(r *http.Request, data map[string]any) map[string]any {
-	data["User"] = currentUser(r)
+	u := currentUser(r)
+	data["User"] = u
 	if _, ok := data["Title"]; !ok {
-		data["Title"] = "Festival Command Center"
+		data["Title"] = "Command Center"
 	}
+	if _, ok := data["Page"]; !ok {
+		data["Page"] = ""
+	}
+	if _, ok := data["Project"]; !ok {
+		data["Project"] = nil
+	}
+	if _, ok := data["Subtitle"]; !ok {
+		data["Subtitle"] = ""
+	}
+	ps, _ := s.listProjectsFor(u)
+	type pl struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+		Slug string `json:"slug"`
+	}
+	list := []pl{}
+	for _, p := range ps {
+		list = append(list, pl{p.ID, p.Name, p.Slug})
+	}
+	data["Projects"] = list
+	ini := strings.ToUpper(u.Username)
+	if len(ini) > 2 {
+		ini = ini[:2]
+	}
+	data["Initials"] = ini
 	return data
 }
 
@@ -134,29 +184,24 @@ func (s *Server) pageLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) pageProjects(w http.ResponseWriter, r *http.Request) {
-	projects, _ := s.listProjectsFor(currentUser(r))
-	type row struct {
-		*Project
-		Devices, Online, Pending int
-	}
-	var rows []row
-	for _, p := range projects {
-		devs, _ := s.listDevices(p.ID)
-		rr := row{Project: p}
-		for _, d := range devs {
-			switch d.Status {
-			case "approved":
-				rr.Devices++
-				if d.Online {
-					rr.Online++
-				}
-			case "pending":
-				rr.Pending++
+	s.render(w, "projects.html", s.base(r, map[string]any{"Title": "Projets", "Subtitle": "Vos projets et leurs appareils", "Page": "projects"}))
+}
+
+// projectStats : compteurs d'appareils d'un projet.
+func (s *Server) projectStats(p *Project) (devices, online, pending int) {
+	devs, _ := s.listDevices(p.ID)
+	for _, d := range devs {
+		switch d.Status {
+		case "approved":
+			devices++
+			if d.Online {
+				online++
 			}
+		case "pending":
+			pending++
 		}
-		rows = append(rows, rr)
 	}
-	s.render(w, "projects.html", s.base(r, map[string]any{"Projects": rows, "Title": "Projets"}))
+	return
 }
 
 func (s *Server) pageProject(w http.ResponseWriter, r *http.Request, page string) {
@@ -177,7 +222,13 @@ func (s *Server) pageProject(w http.ResponseWriter, r *http.Request, page string
 			return
 		}
 	}
-	s.render(w, page+".html", s.base(r, map[string]any{"Project": p, "Page": page, "Title": p.Name}))
+	titles := map[string][2]string{
+		"dashboard": {"Tableau de bord", p.Name}, "devices": {"Appareils", "Appareils rattachés à " + p.Name},
+		"actions": {"Actions", "Requêtes HTTP et automatisations de " + p.Name}, "automations": {"Actions", "Requêtes HTTP et automatisations de " + p.Name},
+		"notifications": {"Notifications", "Journal des événements de " + p.Name}, "settings": {"Configuration", "Projet, clé, membres"},
+	}
+	t := titles[page]
+	s.render(w, page+".html", s.base(r, map[string]any{"Project": p, "Page": page, "Title": t[0], "Subtitle": t[1]}))
 }
 
 // ---- helpers d'accès ----
@@ -358,13 +409,56 @@ func (s *Server) apiRotateKey(w http.ResponseWriter, r *http.Request, p *Project
 	writeJSON(w, map[string]string{"project_key": key})
 }
 
-func (s *Server) apiSaveDashboard(w http.ResponseWriter, r *http.Request, p *Project) {
-	body, err := readAll(r, 1<<20)
-	if err != nil || !json.Valid(body) {
-		jsonError(w, 400, "JSON invalide")
+func (s *Server) apiCreateDashboard(w http.ResponseWriter, r *http.Request, p *Project) {
+	var in struct{ Name string }
+	if !decodeJSON(w, r, &in) {
 		return
 	}
-	s.db.Exec(`UPDATE projects SET dashboard=? WHERE id=?`, string(body), p.ID)
+	in.Name = strings.TrimSpace(in.Name)
+	if in.Name == "" {
+		in.Name = "Nouveau tableau de bord"
+	}
+	var pos int
+	s.db.QueryRow(`SELECT IFNULL(MAX(position),0)+1 FROM dashboards WHERE project_id=?`, p.ID).Scan(&pos)
+	res, err := s.db.Exec(`INSERT INTO dashboards(project_id, name, layout, position, created_at) VALUES(?,?,?,?,?)`, p.ID, in.Name, "[]", pos, now())
+	if err != nil {
+		jsonError(w, 500, err.Error())
+		return
+	}
+	id, _ := res.LastInsertId()
+	d, _ := s.getDashboard(id)
+	writeJSON(w, d)
+}
+
+func (s *Server) apiUpdateDashboard(w http.ResponseWriter, r *http.Request) {
+	d, err := s.getDashboard(pathID(r, "id"))
+	if err != nil {
+		jsonError(w, 404, "tableau de bord introuvable")
+		return
+	}
+	var in struct {
+		Name   *string         `json:"name"`
+		Layout json.RawMessage `json:"layout"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if in.Name != nil && strings.TrimSpace(*in.Name) != "" {
+		s.db.Exec(`UPDATE dashboards SET name=? WHERE id=?`, strings.TrimSpace(*in.Name), d.ID)
+	}
+	if len(in.Layout) > 0 {
+		if !json.Valid(in.Layout) {
+			jsonError(w, 400, "layout invalide")
+			return
+		}
+		s.db.Exec(`UPDATE dashboards SET layout=? WHERE id=?`, string(in.Layout), d.ID)
+	}
+	d, _ = s.getDashboard(d.ID)
+	writeJSON(w, d)
+}
+
+func (s *Server) apiDeleteDashboard(w http.ResponseWriter, r *http.Request) {
+	s.db.Exec(`DELETE FROM dashboards WHERE id=?`, pathID(r, "id"))
 	w.WriteHeader(204)
 }
 
@@ -630,6 +724,7 @@ func (s *Server) apiRunAction(w http.ResponseWriter, r *http.Request) {
 	}
 	res := s.RunAction(r.Context(), a.ID, nil)
 	log.Printf("[portail] %s lance l'action %q : %s", currentUser(r).Username, a.Name, res)
+	s.logEvent(a.ProjectID, a.DeviceID, "action.run", "info", fmt.Sprintf("%s a lancé « %s » : %s", currentUser(r).Username, a.Name, res))
 	writeJSON(w, map[string]string{"result": res})
 }
 

@@ -43,6 +43,13 @@ CREATE TABLE IF NOT EXISTS commands(
   status TEXT NOT NULL DEFAULT 'queued', result TEXT DEFAULT '', created_at TEXT NOT NULL, finished_at TEXT DEFAULT '',
   action_id INTEGER, automation_id INTEGER);
 CREATE INDEX IF NOT EXISTS idx_commands_device ON commands(device_id, status);
+CREATE TABLE IF NOT EXISTS dashboards(
+  id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, name TEXT NOT NULL, layout TEXT NOT NULL DEFAULT '[]',
+  position INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS events(
+  id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, device_id INTEGER, kind TEXT NOT NULL,
+  level TEXT NOT NULL DEFAULT 'info', message TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_events_project ON events(project_id, id);
 `
 
 func openDB(path string) (*sql.DB, error) {
@@ -60,6 +67,7 @@ func openDB(path string) (*sql.DB, error) {
 			return nil, fmt.Errorf("schéma : %w (%s)", err, strings.TrimSpace(stmt)[:40])
 		}
 	}
+	migrateDashboards(db)
 	return db, nil
 }
 
@@ -83,6 +91,33 @@ func migrate(db *sql.DB) {
 	rows.Close()
 	if hasScreenID {
 		db.Exec(`ALTER TABLE devices RENAME COLUMN screen_id TO slug`)
+	}
+}
+
+// migrateDashboards : l'ancien tableau de bord unique (projects.dashboard) devient le tableau « Principal ».
+func migrateDashboards(db *sql.DB) {
+	rows, err := db.Query(`SELECT id, dashboard FROM projects WHERE dashboard != '' AND dashboard != '[]'`)
+	if err != nil {
+		return
+	}
+	type pd struct {
+		id     int64
+		layout string
+	}
+	var list []pd
+	for rows.Next() {
+		var x pd
+		rows.Scan(&x.id, &x.layout)
+		list = append(list, x)
+	}
+	rows.Close()
+	for _, x := range list {
+		var n int
+		db.QueryRow(`SELECT COUNT(*) FROM dashboards WHERE project_id=?`, x.id).Scan(&n)
+		if n == 0 {
+			db.Exec(`INSERT INTO dashboards(project_id, name, layout, position, created_at) VALUES(?,?,?,?,?)`, x.id, "Principal", x.layout, 0, now())
+		}
+		db.Exec(`UPDATE projects SET dashboard='[]' WHERE id=?`, x.id)
 	}
 }
 

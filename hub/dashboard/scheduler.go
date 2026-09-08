@@ -107,6 +107,13 @@ func (sc *Scheduler) runAutomation(id int64) {
 	res := sc.s.RunAction(context.Background(), actionID, &id)
 	sc.s.db.Exec(`UPDATE automations SET last_run=?, last_result=? WHERE id=?`, now(), res, id)
 	log.Printf("[cron] %s : %s", name, res)
+	var pid int64
+	sc.s.db.QueryRow(`SELECT project_id FROM automations WHERE id=?`, id).Scan(&pid)
+	level := "info"
+	if strings.HasPrefix(res, "erreur") {
+		level = "error"
+	}
+	sc.s.logEvent(pid, nil, "automation.run", level, fmt.Sprintf("Automatisation « %s » : %s", name, res))
 }
 
 // RunAction exécute une action : côté hub (requête HTTP directe) ou côté agent (commande en file).

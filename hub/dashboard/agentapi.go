@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -74,6 +75,7 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 		if e == nil {
 			existing.ID, _ = res.LastInsertId()
 			log.Printf("[agent] nouvel appareil %s en attente dans le projet %s", req.Slug, p.Slug)
+			s.logEvent(p.ID, &existing.ID, "device.pending", "warn", fmt.Sprintf("Nouvel appareil « %s » (%s) en attente d'approbation", req.Name, req.Hostname))
 		}
 	}
 	if err != nil {
@@ -175,6 +177,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	json.Unmarshal(body, &hb)
 	s.db.Exec(`UPDATE devices SET last_heartbeat=?, last_seen=?, tailnet_ip=?, agent_version=?, hostname=? WHERE id=?`,
 		string(body), now(), hb.TailnetIP, hb.AgentVersion, hb.System.Hostname, d.ID)
+	s.trackTransitions(d, body)
 
 	var cmds []Command
 	if d.Status == "approved" {
@@ -217,6 +220,7 @@ func (s *Server) handleCommandResult(w http.ResponseWriter, r *http.Request) {
 	status := "done"
 	if !res.OK {
 		status = "failed"
+		s.logEvent(d.ProjectID, &d.ID, "command.failed", "error", fmt.Sprintf("Commande échouée sur %s : %s", d.Name, res.Result))
 	}
 	s.db.Exec(`UPDATE commands SET status=?, result=?, finished_at=? WHERE id=? AND device_id=?`, status, res.Result, now(), id, d.ID)
 	// remonter le résultat sur l'action / l'automatisation d'origine
@@ -265,6 +269,9 @@ func (s *Server) approveDevice(ctx context.Context, d *Device) error {
 		key = k
 	}
 	_, err := s.db.Exec(`UPDATE devices SET status='approved', approved_at=?, headscale_key=?, headscale_key_delivered=0 WHERE id=?`, now(), key, d.ID)
+	if err == nil {
+		s.logEvent(d.ProjectID, &d.ID, "device.approved", "info", fmt.Sprintf("Appareil « %s » approuvé", d.Name))
+	}
 	return err
 }
 
@@ -275,5 +282,82 @@ func (s *Server) revokeDevice(ctx context.Context, d *Device, status string) err
 		}
 	}
 	_, err := s.db.Exec(`UPDATE devices SET status=?, headscale_key='', headscale_key_delivered=0, tailnet_ip='' WHERE id=?`, status, d.ID)
+	if err == nil {
+		s.logEvent(d.ProjectID, &d.ID, "device."+status, "warn", fmt.Sprintf("Appareil « %s » %s", d.Name, map[string]string{"revoked": "révoqué", "rejected": "refusé"}[status]))
+	}
 	return err
+}
+
+// trackTransitions journalise les passages en ligne / hors ligne et l'état des sous-appareils.
+func (s *Server) trackTransitions(d *Device, body []byte) {
+	var hb struct {
+		SubDevices []struct {
+			Name      string `json:"name"`
+			Reachable bool   `json:"reachable"`
+		} `json:"sub_devices"`
+	}
+	json.Unmarshal(body, &hb)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	prev, seen := s.lastState[d.ID]
+	cur := deviceState{online: true, subs: map[string]bool{}}
+	for _, sd := range hb.SubDevices {
+		cur.subs[sd.Name] = sd.Reachable
+	}
+	if !seen || !prev.online {
+		if seen || !d.Online {
+			s.logEvent(d.ProjectID, &d.ID, "device.online", "info", fmt.Sprintf("« %s » est en ligne", d.Name))
+		}
+	}
+	for name, ok := range cur.subs {
+		pok, had := prev.subs[name]
+		if !ok && (!had || pok) {
+			s.logEvent(d.ProjectID, &d.ID, "subdevice.down", "error", fmt.Sprintf("%s : sous-appareil « %s » injoignable", d.Name, name))
+		} else if ok && had && !pok {
+			s.logEvent(d.ProjectID, &d.ID, "subdevice.up", "info", fmt.Sprintf("%s : sous-appareil « %s » de nouveau joignable", d.Name, name))
+		}
+	}
+	s.lastState[d.ID] = cur
+}
+
+// offlineWatcher détecte les appareils qui cessent d'envoyer des heartbeats.
+func (s *Server) offlineWatcher() {
+	for {
+		time.Sleep(15 * time.Second)
+		rows, err := s.db.Query(`SELECT id, project_id, name, last_seen FROM devices WHERE status='approved' AND last_seen!=''`)
+		if err != nil {
+			continue
+		}
+		type row struct {
+			id, pid  int64
+			name, ls string
+		}
+		var list []row
+		for rows.Next() {
+			var r row
+			rows.Scan(&r.id, &r.pid, &r.name, &r.ls)
+			list = append(list, r)
+		}
+		rows.Close()
+		for _, r := range list {
+			t, err := time.Parse(time.RFC3339, r.ls)
+			if err != nil {
+				continue
+			}
+			online := time.Since(t) < s.stale
+			s.mu.Lock()
+			prev, seen := s.lastState[r.id]
+			if !online && seen && prev.online {
+				prev.online = false
+				s.lastState[r.id] = prev
+				s.mu.Unlock()
+				s.logEvent(r.pid, &r.id, "device.offline", "error", fmt.Sprintf("« %s » est hors ligne", r.name))
+				continue
+			}
+			if !seen {
+				s.lastState[r.id] = deviceState{online: online, subs: map[string]bool{}}
+			}
+			s.mu.Unlock()
+		}
+	}
 }

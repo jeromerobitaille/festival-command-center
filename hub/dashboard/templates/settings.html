@@ -1,19 +1,18 @@
 {{template "head" .}}
-<div class="page-head"><h1>Configuration du projet</h1></div>
-<div class="two-col">
-  <section class="card">
-    <h2>Projet</h2>
-    <label>Nom <input id="p-name" value="{{.Project.Name}}"></label>
-    <label>Fuseau horaire <input id="p-tz" value="{{.Project.Timezone}}" placeholder="America/Toronto"></label>
-    <button class="btn primary" onclick="Settings.save()">Enregistrer</button>
+<div class="settings">
+  <section class="setting">
+    <div class="setting-info"><h2>Projet</h2><p>Nom affiché et fuseau horaire utilisé par les automatisations.</p></div>
+    <div class="setting-body">
+      <label class="field"><span>Nom</span><input id="p-name" value="{{.Project.Name}}"></label>
+      <label class="field"><span>Fuseau horaire</span><input id="p-tz" value="{{.Project.Timezone}}" placeholder="America/Toronto"></label>
+      <div class="row-end"><button class="btn primary" onclick="Settings.save()">Enregistrer</button></div>
+    </div>
   </section>
-  <section class="card">
-    <h2>Clé de projet</h2>
-    <p class="muted small">À mettre dans le <code>agent.toml</code> de chaque appareil. Chaque nouvel appareil devra être approuvé dans l'onglet Appareils.</p>
-    <div class="keyrow"><code id="p-key">{{.Project.ProjectKey}}</code><button class="btn small" onclick="App.copy(document.getElementById('p-key').textContent)">Copier</button></div>
-    <button class="btn danger small" onclick="Settings.rotate()">Régénérer la clé</button>
-    <p class="muted small">Régénérer n'affecte pas les appareils déjà approuvés, seulement les nouvelles inscriptions.</p>
-    <h3>agent.toml minimal</h3>
+  <section class="setting">
+    <div class="setting-info"><h2>Clé de projet</h2><p>À coller dans l'agent de chaque appareil. Chaque nouvel appareil devra ensuite être approuvé dans Appareils.</p></div>
+    <div class="setting-body">
+      <div class="keyrow"><code id="p-key">{{.Project.ProjectKey}}</code><button class="btn small" onclick="App.copy(document.getElementById('p-key').textContent)">Copier</button></div>
+      <details class="details"><summary>Fichier agent.toml minimal</summary>
 <pre id="p-toml">[portal]
 url         = "{{"{{ORIGIN}}"}}"
 project_key = "{{.Project.ProjectKey}}"
@@ -21,18 +20,17 @@ project_key = "{{.Project.ProjectKey}}"
 [device]
 id   = "appareil-01"
 name = "Nom affiché"</pre>
-    <button class="btn small" onclick="App.copy(document.getElementById('p-toml').textContent)">Copier</button>
+      <button class="btn small" onclick="App.copy(document.getElementById('p-toml').textContent)">Copier</button></details>
+      <div class="row-end"><button class="btn small danger-text" onclick="Settings.rotate()">Régénérer la clé</button></div>
+    </div>
   </section>
-  <section class="card">
-    <h2>Membres</h2>
-    <p class="muted small">Les administrateurs voient tous les projets. Cochez les utilisateurs qui peuvent voir celui-ci.</p>
-    <div id="members"></div>
-    <button class="btn primary" onclick="Settings.saveMembers()">Enregistrer les membres</button>
+  <section class="setting">
+    <div class="setting-info"><h2>Membres</h2><p>Les administrateurs voient tous les projets. Cochez les utilisateurs qui peuvent voir celui-ci.</p></div>
+    <div class="setting-body"><div id="members" class="checklist"></div><div class="row-end"><button class="btn primary" onclick="Settings.saveMembers()">Enregistrer les membres</button></div></div>
   </section>
-  <section class="card danger-zone">
-    <h2>Supprimer le projet</h2>
-    <p class="muted small">Révoque tous les appareils du réseau et efface actions, automatisations et tableau de bord.</p>
-    <button class="btn danger" onclick="Settings.remove()">Supprimer « {{.Project.Name}} »</button>
+  <section class="setting danger">
+    <div class="setting-info"><h2>Supprimer le projet</h2><p>Révoque tous les appareils du réseau et efface actions, automatisations et tableaux de bord.</p></div>
+    <div class="setting-body"><div class="row-end"><button class="btn danger" onclick="Settings.remove()">Supprimer « {{.Project.Name}} »</button></div></div>
   </section>
 </div>
 {{template "foot" .}}

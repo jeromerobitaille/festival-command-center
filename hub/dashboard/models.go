@@ -339,3 +339,90 @@ func (s *Server) queueCommand(deviceID int64, kind string, payload any, actionID
 	}
 	return res.LastInsertId()
 }
+
+type Dashboard struct {
+	ID        int64           `json:"id"`
+	ProjectID int64           `json:"project_id"`
+	Name      string          `json:"name"`
+	Layout    json.RawMessage `json:"layout"`
+	Position  int             `json:"position"`
+	CreatedAt string          `json:"created_at"`
+}
+
+func (s *Server) listDashboards(projectID int64) ([]*Dashboard, error) {
+	rows, err := s.db.Query(`SELECT id, project_id, name, layout, position, created_at FROM dashboards WHERE project_id=? ORDER BY position, id`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*Dashboard{}
+	for rows.Next() {
+		d := &Dashboard{}
+		var layout string
+		if err := rows.Scan(&d.ID, &d.ProjectID, &d.Name, &layout, &d.Position, &d.CreatedAt); err != nil {
+			return nil, err
+		}
+		if layout == "" {
+			layout = "[]"
+		}
+		d.Layout = json.RawMessage(layout)
+		out = append(out, d)
+	}
+	return out, nil
+}
+
+func (s *Server) getDashboard(id int64) (*Dashboard, error) {
+	d := &Dashboard{}
+	var layout string
+	err := s.db.QueryRow(`SELECT id, project_id, name, layout, position, created_at FROM dashboards WHERE id=?`, id).Scan(&d.ID, &d.ProjectID, &d.Name, &layout, &d.Position, &d.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	if layout == "" {
+		layout = "[]"
+	}
+	d.Layout = json.RawMessage(layout)
+	return d, nil
+}
+
+// Event : journal du projet (page Notifications).
+type Event struct {
+	ID         int64  `json:"id"`
+	ProjectID  int64  `json:"project_id"`
+	DeviceID   *int64 `json:"device_id"`
+	DeviceName string `json:"device_name,omitempty"`
+	Kind       string `json:"kind"`
+	Level      string `json:"level"`
+	Message    string `json:"message"`
+	CreatedAt  string `json:"created_at"`
+}
+
+func (s *Server) logEvent(projectID int64, deviceID *int64, kind, level, msg string) {
+	s.db.Exec(`INSERT INTO events(project_id, device_id, kind, level, message, created_at) VALUES(?,?,?,?,?,?)`, projectID, deviceID, kind, level, msg, now())
+	s.db.Exec(`DELETE FROM events WHERE project_id=? AND id < (SELECT MIN(id) FROM (SELECT id FROM events WHERE project_id=? ORDER BY id DESC LIMIT 2000))`, projectID, projectID)
+}
+
+func (s *Server) listEvents(projectID int64, limit int, afterID int64) ([]*Event, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := s.db.Query(`SELECT e.id, e.project_id, e.device_id, IFNULL(d.name,''), e.kind, e.level, e.message, e.created_at
+		FROM events e LEFT JOIN devices d ON d.id=e.device_id WHERE e.project_id=? AND e.id>? ORDER BY e.id DESC LIMIT ?`, projectID, afterID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*Event{}
+	for rows.Next() {
+		e := &Event{}
+		var dev sql.NullInt64
+		if err := rows.Scan(&e.ID, &e.ProjectID, &dev, &e.DeviceName, &e.Kind, &e.Level, &e.Message, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		if dev.Valid {
+			e.DeviceID = &dev.Int64
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}

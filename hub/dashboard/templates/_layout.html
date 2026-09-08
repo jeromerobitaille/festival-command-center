@@ -3,36 +3,61 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{.Title}} · Festival Command Center</title>
+<title>{{.Title}} · Command Center</title>
 <link rel="stylesheet" href="/static/app.css">
 {{if eq .Page "dashboard"}}<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/gridstack.js/13.2.0/gridstack.min.css">{{end}}
 </head>
-<body data-page="{{.Page}}">
-<header class="top">
-  <a class="brand" href="/">Festival Command Center</a>
-  {{if .Project}}
-  <nav class="tabs">
-    <a href="/p/{{.Project.Slug}}" class="{{if eq .Page "dashboard"}}on{{end}}">Tableau de bord</a>
-    <a href="/p/{{.Project.Slug}}/devices" class="{{if eq .Page "devices"}}on{{end}}">Appareils</a>
-    <a href="/p/{{.Project.Slug}}/actions" class="{{if eq .Page "actions"}}on{{end}}">Actions</a>
-    <a href="/p/{{.Project.Slug}}/automations" class="{{if eq .Page "automations"}}on{{end}}">Automatisations</a>
-    {{if .User.IsAdmin}}<a href="/p/{{.Project.Slug}}/settings" class="{{if eq .Page "settings"}}on{{end}}">Configuration</a>{{end}}
-  </nav>
-  {{end}}
-  <div class="me">
-    {{if .User.IsAdmin}}<a href="/admin/users">Utilisateurs</a>{{end}}
-    <button class="link" onclick="App.changePassword()">{{.User.Username}}</button>
-    <form method="post" action="/logout" class="inline"><button class="link">Quitter</button></form>
+<body class="app" data-page="{{.Page}}">
+<div class="scrim" id="scrim" hidden></div>
+<aside class="sidebar" id="sidebar" aria-label="Navigation">
+  <div class="sb-top">
+    <a class="brand" href="/"><span class="brand-mark" aria-hidden="true"></span><span>Command Center</span></a>
+    {{if .Project}}
+    <button class="switcher" id="project-switcher" aria-haspopup="menu" title="Changer de projet">
+      <span class="switcher-label">Projet</span><span class="switcher-name">{{.Project.Name}}</span><span class="chev" aria-hidden="true"></span>
+    </button>
+    {{end}}
   </div>
-</header>
-<main>
+  <nav class="sb-nav">
+    {{if .Project}}
+    <a href="/p/{{.Project.Slug}}" class="nav-item {{if eq .Page "dashboard"}}on{{end}}"><i data-icon="dashboard"></i>Tableau de bord</a>
+    <a href="/p/{{.Project.Slug}}/devices" class="nav-item {{if eq .Page "devices"}}on{{end}}"><i data-icon="devices"></i>Appareils<span class="nav-badge" id="nav-pending" hidden></span></a>
+    <a href="/p/{{.Project.Slug}}/actions" class="nav-item {{if or (eq .Page "actions") (eq .Page "automations")}}on{{end}}"><i data-icon="actions"></i>Actions</a>
+    <a href="/p/{{.Project.Slug}}/notifications" class="nav-item {{if eq .Page "notifications"}}on{{end}}"><i data-icon="bell"></i>Notifications<span class="nav-badge" id="nav-unread" hidden></span></a>
+    {{if .User.IsAdmin}}<a href="/admin/users" class="nav-item"><i data-icon="users"></i>Utilisateurs</a>
+    <a href="/p/{{.Project.Slug}}/settings" class="nav-item {{if eq .Page "settings"}}on{{end}}"><i data-icon="settings"></i>Configuration</a>{{end}}
+    {{else}}
+    <a href="/" class="nav-item {{if eq .Page "projects"}}on{{end}}"><i data-icon="folder"></i>Projets</a>
+    {{if .User.IsAdmin}}<a href="/admin/users" class="nav-item {{if eq .Page "users"}}on{{end}}"><i data-icon="users"></i>Utilisateurs</a>{{end}}
+    {{end}}
+  </nav>
+  <div class="sb-bottom">
+    <button class="me" id="user-menu" aria-haspopup="menu">
+      <span class="avatar" aria-hidden="true">{{.Initials}}</span>
+      <span class="me-text"><span class="me-name">{{.User.Username}}</span><span class="me-role">{{if .User.IsAdmin}}Administrateur{{else}}Utilisateur{{end}}</span></span>
+      <span class="chev" aria-hidden="true"></span>
+    </button>
+  </div>
+</aside>
+<div class="main">
+  <header class="topbar">
+    <button class="icon-btn only-mobile" id="menu-btn" aria-label="Menu"><i data-icon="menu"></i></button>
+    <div class="page-title"><h1>{{.Title}}</h1>{{if .Subtitle}}<p>{{.Subtitle}}</p>{{end}}</div>
+    <div class="topbar-right">
+      <label class="search" id="search-box" hidden><i data-icon="search"></i><input id="global-search" type="search" placeholder="Rechercher…" autocomplete="off"></label>
+      {{if .Project}}<a class="icon-btn" href="/p/{{.Project.Slug}}/notifications" id="bell" aria-label="Notifications"><i data-icon="bell"></i><span class="dot-badge" id="bell-badge" hidden></span></a>{{end}}
+      <span id="page-actions"></span>
+    </div>
+  </header>
+  <main class="content" id="content">
 {{end}}
 
 {{define "foot"}}
-</main>
-<div id="toast" class="toast" hidden></div>
-<div id="modal" class="modal" hidden><div class="modal-box"><div id="modal-body"></div></div></div>
-<script>window.PROJECT = {{if .Project}}{{json .Project}}{{else}}null{{end}}; window.ME = {{json .User}};</script>
+  </main>
+</div>
+<div id="toast" class="toast" hidden role="status"></div>
+<div id="modal" class="modal" hidden><div class="modal-box" role="dialog" aria-modal="true"><div id="modal-body"></div></div></div>
+<script>window.PROJECT = {{if .Project}}{{json .Project}}{{else}}null{{end}}; window.PROJECTS = {{json .Projects}}; window.ME = {{json .User}};</script>
 {{if eq .Page "dashboard"}}<script src="https://cdnjs.cloudflare.com/ajax/libs/gridstack.js/13.2.0/gridstack-all.min.js"></script>{{end}}
 <script src="/static/app.js"></script>
 </body>

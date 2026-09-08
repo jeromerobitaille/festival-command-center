@@ -1,5 +1,7 @@
 {{template "head" .}}
-<div class="page-head"><h1>Actions</h1>{{if .User.IsAdmin}}<button class="btn primary" onclick="Actions.edit()">Nouvelle action</button>{{end}}</div>
-<p class="muted small">Une action est une requête HTTP. Exécutée par le hub pour une API externe, ou par l'agent d'un appareil pour joindre un sous-appareil sur son réseau local (par exemple l'API HTTP d'un processeur LED). Les actions servent aux boutons du tableau de bord et aux automatisations.</p>
+<div class="tabs" role="tablist">
+  <a role="tab" class="tab {{if eq .Page "actions"}}on{{end}}" href="/p/{{.Project.Slug}}/actions">Actions</a>
+  <a role="tab" class="tab {{if eq .Page "automations"}}on{{end}}" href="/p/{{.Project.Slug}}/automations">Automatisations</a>
+</div>
 <div id="action-list"></div>
 {{template "foot" .}}

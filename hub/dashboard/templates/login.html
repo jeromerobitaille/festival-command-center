@@ -1,14 +1,15 @@
 <!doctype html>
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Connexion · Festival Command Center</title><link rel="stylesheet" href="/static/app.css"></head>
+<title>Connexion · Command Center</title><link rel="stylesheet" href="/static/app.css"></head>
 <body class="login-page">
-<form method="post" action="/login" class="login card">
-  <h1>Festival Command Center</h1>
-  <p class="muted">Connectez-vous pour accéder aux projets.</p>
-  {{if .Error}}<p class="err">{{.Error}}</p>{{end}}
+<form method="post" action="/login" class="login">
+  <div class="brand big"><span class="brand-mark" aria-hidden="true"></span><span>Command Center</span></div>
+  <h1>Connexion</h1>
+  <p class="muted">Accédez à vos projets et à vos appareils.</p>
+  {{if .Error}}<p class="form-error" role="alert">{{.Error}}</p>{{end}}
   <input type="hidden" name="next" value="{{.Next}}">
-  <label>Utilisateur <input name="username" autocomplete="username" required autofocus></label>
-  <label>Mot de passe <input name="password" type="password" autocomplete="current-password" required></label>
-  <button class="btn primary">Se connecter</button>
+  <label class="field"><span>Utilisateur</span><input name="username" autocomplete="username" required autofocus></label>
+  <label class="field"><span>Mot de passe</span><input name="password" type="password" autocomplete="current-password" required></label>
+  <button class="btn primary block">Se connecter</button>
 </form>
 </body></html>

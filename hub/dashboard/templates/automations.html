@@ -1,5 +1,7 @@
 {{template "head" .}}
-<div class="page-head"><h1>Automatisations</h1>{{if .User.IsAdmin}}<button class="btn primary" onclick="Autos.edit()">Nouvelle automatisation</button>{{end}}</div>
-<p class="muted small">Une automatisation exécute une action selon un horaire, dans le fuseau du projet ({{.Project.Timezone}}).</p>
+<div class="tabs" role="tablist">
+  <a role="tab" class="tab" href="/p/{{.Project.Slug}}/actions">Actions</a>
+  <a role="tab" class="tab on" href="/p/{{.Project.Slug}}/automations">Automatisations</a>
+</div>
 <div id="auto-list"></div>
 {{template "foot" .}}

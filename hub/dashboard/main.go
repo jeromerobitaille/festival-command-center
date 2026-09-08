@@ -3,6 +3,7 @@ package main
 
 import (
 	"embed"
+	"sync"
 	"encoding/json"
 	"html/template"
 	"io"
@@ -27,6 +28,14 @@ type Server struct {
 	hs    *Headscale
 	sched *Scheduler
 	stale time.Duration
+
+	mu        sync.Mutex
+	lastState map[int64]deviceState // transitions en ligne / hors ligne / sous-appareils
+}
+
+type deviceState struct {
+	online bool
+	subs   map[string]bool
 }
 
 func env(key, def string) string {
@@ -47,8 +56,9 @@ func main() {
 		log.Fatal(err)
 	}
 	s := &Server{
-		db:    db,
-		stale: time.Duration(staleSec) * time.Second,
+		db:        db,
+		stale:     time.Duration(staleSec) * time.Second,
+		lastState: map[int64]deviceState{},
 		hs: &Headscale{
 			URL: os.Getenv("HEADSCALE_URL"), Public: os.Getenv("HEADSCALE_PUBLIC_URL"),
 			APIKey: os.Getenv("HEADSCALE_API_KEY"), User: env("HEADSCALE_USER", "festival"),
@@ -64,6 +74,7 @@ func main() {
 	s.bootstrapAdmin()
 	s.sched = newScheduler(s)
 	s.sched.ReloadAll()
+	go s.offlineWatcher()
 	go func() {
 		for {
 			s.purgeSessions()
