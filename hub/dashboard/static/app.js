@@ -19,6 +19,8 @@ const ICONS = {
   monitor: '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>',
   play: '<path d="m6 4 14 8-14 8z"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
+  chevron: '<path d="m6 9 6 6 6-6"/>',
+  braces: '<path d="M8 3H7a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2 2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1M16 3h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2 2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-1"/>',
 };
 function iconSVG(name) { return `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`; }
 function renderIcons(root = document) { root.querySelectorAll('i[data-icon]').forEach(i => { if (!i.firstChild) i.innerHTML = iconSVG(i.dataset.icon); }); }
@@ -120,20 +122,99 @@ const UI = {
     const lines = !d.online ? '' : subs.length ? subs.map(sd => `<span class="dot ${sd.reachable ? 'ok' : 'danger'}"></span>${App.esc(sd.name)}${sd.reachable ? ' · ' + sd.rtt_ms.toFixed(1) + ' ms' : ' · injoignable'}`).join('<br>') : '<span class="muted">aucun sous-appareil</span>';
     return `<div class="tile ${d.online ? '' : 'off'}"><b><span class="dot ${d.online ? 'ok' : 'danger'}"></span>${App.esc(d.name)}</b><div class="sub-line">${d.online ? 'en ligne' : 'hors ligne depuis ' + App.age(d.age_seconds)}${relayed ? ' · relais' : ''}</div><div>${lines}</div></div>`;
   },
-  deviceDetail(d) {
-    const hb = d.last_heartbeat || {}; const sys = hb.system || {}; const subs = UI.subDevicesOf(hb); const peers = (hb.peers || []).filter(p => p.online); const fwds = d.config.forwards || [];
-    return `<dl class="kv">
-      <dt>État</dt><dd>${UI.status(d)}${d.online ? ` <span class="muted small">vu il y a ${App.age(d.age_seconds)}</span>` : ''}</dd>
-      <dt>IP réseau privé</dt><dd><code>${App.esc(d.tailnet_ip || '—')}</code></dd>
-      <dt>Forwards</dt><dd>${d.tailnet_ip && fwds.length ? fwds.map(f => `<code>${App.esc(d.tailnet_ip)}:${f.listen}</code> <span class="muted small">${App.esc(f.name)} → ${App.esc(f.target)}</span>`).join('<br>') : '<span class="muted">aucun</span>'}</dd>
-      <dt>Sous-appareils</dt><dd>${subs.length ? subs.map(sd => `<span class="dot ${sd.reachable ? 'ok' : 'danger'}"></span>${App.esc(sd.name)} <span class="muted small">${App.esc(sd.target)} · ${sd.reachable ? sd.rtt_ms.toFixed(1) + ' ms' : App.esc(sd.error || 'injoignable')}</span>`).join('<br>') : '<span class="muted">aucun</span>'}</dd>
-      <dt>Chemin réseau</dt><dd>${peers.length ? peers.map(p => `${App.esc(p.hostname)} ${p.direct ? UI.badge('ok', 'direct') : UI.badge('warn', 'relais ' + p.relay)} <span class="muted small">${p.latency_ms ? p.latency_ms.toFixed(1) + ' ms' : ''}</span>`).join('<br>') : '<span class="muted">aucun pair en ligne</span>'}</dd>
-      <dt>Machine</dt><dd>${App.esc(sys.hostname || d.hostname)} · ${App.esc(sys.os || d.os)}${sys.cpu_percent != null ? `<span class="muted small"> · CPU ${Math.round(sys.cpu_percent)} % · RAM ${Math.round(sys.mem_percent)} % · allumée depuis ${App.age(sys.uptime_seconds)}</span>` : ''}</dd>
-      <dt>Agent</dt><dd>${App.esc(d.agent_version || '—')}</dd>
-      <dt>Bureau à distance</dt><dd>${hb.remote_desktop && hb.remote_desktop.id ? `<a class="btn small" href="rustdesk://connection/new/${App.esc(hb.remote_desktop.id)}">Ouvrir dans RustDesk</a> <code>${App.esc(hb.remote_desktop.id)}</code>` : '<span class="muted">RustDesk non détecté</span>'}</dd>
-    </dl>`;
+  devState(d) {
+    const hb = d.last_heartbeat || {}; const sys = hb.system || {}; const subs = UI.subDevicesOf(hb);
+    const peers = (hb.peers || []).filter(p => p.online); const free = (d.config.forwards || []).filter(f => !f.sub);
+    const rd = hb.remote_desktop && hb.remote_desktop.id;
+    const subLine = sd => {
+      const cfg = (d.config.sub_devices || []).find(x => x.name === sd.name);
+      const addr = cfg && cfg.expose && d.tailnet_ip ? `<code>${App.esc(d.tailnet_ip)}:${cfg.listen || cfg.port}</code>` : '<span class="faint">non exposé</span>';
+      return `<div class="sub-stat"><span class="dot ${sd.reachable ? 'ok' : 'danger'}"></span><span>${App.esc(sd.name)}</span><span class="muted">${App.esc(sd.target)}</span>
+        <span class="${sd.reachable ? 'muted' : 'danger-text'}">${sd.reachable ? sd.rtt_ms.toFixed(1) + ' ms' : App.esc(sd.error || 'injoignable')}</span><span>${addr}</span></div>`;
+    };
+    return `<h3>Connexion</h3>
+      <dl class="kv">
+        <dt>État</dt><dd>${UI.status(d)}${d.online ? ` <span class="muted small">vu il y a ${App.age(d.age_seconds)}</span>` : ''}</dd>
+        <dt>Adresse privée</dt><dd><code>${App.esc(d.tailnet_ip || '—')}</code></dd>
+        <dt>Réseau local</dt><dd>${sys.lan_ip ? `<code>${App.esc(sys.lan_ip)}</code> <span class="muted small">${App.esc(sys.lan_cidr || '')}${sys.lan_iface ? ' · ' + App.esc(sys.lan_iface) : ''}</span>` : '<span class="muted">inconnu — agent trop ancien</span>'}</dd>
+        <dt>Chemin réseau</dt><dd>${peers.length ? peers.map(p => `${App.esc(p.hostname)} ${p.direct ? UI.badge('ok', 'direct') : UI.badge('warn', 'relais ' + p.relay)} <span class="muted small">${p.latency_ms ? p.latency_ms.toFixed(1) + ' ms' : ''}</span>`).join('<br>') : '<span class="muted">aucun pair en ligne</span>'}</dd>
+      </dl>
+      <h3>Sous-appareils</h3>
+      ${subs.length ? `<div class="sub-stat hdr"><span></span><span>nom</span><span>cible</span><span>latence</span><span>accès</span></div>${subs.map(subLine).join('')}`
+        : '<p class="muted small">Aucun sous-appareil détecté. Déclarez-en un dans la configuration à droite.</p>'}
+      <h3>Accès à distance</h3>
+      <dl class="kv">
+        <dt>Bureau à distance</dt><dd>${rd ? `<a class="btn small" href="rustdesk://connection/new/${App.esc(hb.remote_desktop.id)}">Ouvrir dans RustDesk</a> <code>${App.esc(hb.remote_desktop.id)}</code>` : '<span class="muted">RustDesk non détecté</span>'}</dd>
+        ${free.length ? `<dt>Forwards libres</dt><dd>${free.map(f => `<code>${App.esc(d.tailnet_ip)}:${f.listen}</code> <span class="muted small">${App.esc(f.name)} → ${App.esc(f.target)}</span>`).join('<br>')}</dd>` : ''}
+      </dl>
+      <h3>Machine</h3>
+      <dl class="kv">
+        <dt>Hôte</dt><dd>${App.esc(sys.hostname || d.hostname)} <span class="muted small">${App.esc(sys.os || d.os)}</span></dd>
+        ${sys.cpu_percent != null ? `<dt>Charge</dt><dd>CPU ${Math.round(sys.cpu_percent)} % · RAM ${Math.round(sys.mem_percent)} % <span class="muted small">· allumée depuis ${App.age(sys.uptime_seconds)}</span></dd>` : ''}
+        <dt>Agent</dt><dd>${App.esc(d.agent_version || '—')}</dd>
+      </dl>`;
   },
   eventRow(e) { const ic = e.level === 'error' ? 'alert' : e.level === 'warn' ? 'alert' : 'info'; return `<div class="event ${e.level}"><i data-icon="${ic}"></i><div class="msg">${App.esc(e.message)}</div><div class="when" title="${App.esc(e.created_at)}">${App.rel(e.created_at)}</div></div>`; },
+};
+
+/* ---------- Variables ---------- */
+// Le catalogue vient du serveur (/api/projects/{id}/variables) : le navigateur ne calcule
+// aucune valeur, il substitue. Une seule source de vérité, partagée avec l'exécution des actions.
+const Vars = {
+  list: [], map: {},
+  async load() {
+    try { Vars.list = await App.api('GET', `/api/projects/${PROJECT.id}/variables`); } catch { return; }
+    Vars.map = {}; Vars.list.forEach(v => Vars.map[v.key] = v.value);
+  },
+  re: /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g,
+  // Texte brut : une clé inconnue reste littérale.
+  resolve(text) { return String(text ?? '').replace(Vars.re, (m, k) => k in Vars.map ? Vars.map[k] : m); },
+  // HTML échappé ; une clé inconnue est surlignée pour signaler la faute de frappe.
+  resolveHTML(text) {
+    const src = String(text ?? ''); let out = '', last = 0, m; Vars.re.lastIndex = 0;
+    while ((m = Vars.re.exec(src))) {
+      out += App.esc(src.slice(last, m.index));
+      out += m[1] in Vars.map ? App.esc(Vars.map[m[1]]) : `<span class="var-unknown" title="Variable inconnue">${App.esc(m[0])}</span>`;
+      last = m.index + m[0].length;
+    }
+    return out + App.esc(src.slice(last));
+  },
+  btn(targetId) { return `<button type="button" class="btn ghost small vp-btn" onclick="Vars.picker(this, '${targetId}')"><i data-icon="braces"></i>Variables</button>`; },
+  insert(target, txt) {
+    const el = typeof target === 'string' ? document.getElementById(target) : target; if (!el) return;
+    const a = el.selectionStart ?? el.value.length, b = el.selectionEnd ?? a;
+    el.value = el.value.slice(0, a) + txt + el.value.slice(b);
+    el.focus(); el.selectionStart = el.selectionEnd = a + txt.length;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  },
+  picker(anchor, target) {
+    App.closeMenu(); Vars.close();
+    const box = document.createElement('div'); box.className = 'varpick';
+    box.innerHTML = `<div class="vp-head"><input class="vp-q" placeholder="Filtrer…" autocomplete="off"></div><div class="vp-list"></div>`;
+    document.body.appendChild(box);
+    const listEl = box.querySelector('.vp-list');
+    const draw = q => {
+      q = q.trim().toLowerCase();
+      const hit = Vars.list.filter(v => !q || (v.key + ' ' + v.label + ' ' + v.group).toLowerCase().includes(q));
+      if (!hit.length) { listEl.innerHTML = '<p class="muted small" style="padding:12px">Aucune variable ne correspond.</p>'; return; }
+      let g = null, html = '';
+      hit.forEach(v => {
+        if (v.group !== g) { g = v.group; html += `<div class="vp-group">${App.esc(g)}</div>`; }
+        html += `<button type="button" class="vp-row" data-k="${App.esc(v.key)}"><code>${App.esc(v.key)}</code><span class="vp-lbl">${App.esc(v.label)}</span><span class="vp-val">${App.esc(v.value || '—')}</span></button>`;
+      });
+      listEl.innerHTML = html;
+      listEl.querySelectorAll('.vp-row').forEach(b => b.onclick = () => { Vars.insert(target, '{{ ' + b.dataset.k + ' }}'); Vars.close(); });
+    };
+    draw('');
+    box.querySelector('.vp-q').oninput = e => draw(e.target.value);
+    const r = anchor.getBoundingClientRect();
+    box.style.left = Math.max(8, Math.min(r.left + window.scrollX, window.innerWidth - box.offsetWidth - 12)) + 'px';
+    box.style.top = (r.bottom + 6 + window.scrollY) + 'px';
+    if (r.bottom + box.offsetHeight + 12 > window.innerHeight) box.style.top = Math.max(8, r.top + window.scrollY - box.offsetHeight - 6) + 'px';
+    Vars._box = box; box.querySelector('.vp-q').focus();
+    setTimeout(() => document.addEventListener('click', Vars._onClick = e => { if (!box.contains(e.target) && !anchor.contains(e.target)) Vars.close(); }), 0);
+  },
+  close() { if (Vars._box) { Vars._box.remove(); Vars._box = null; document.removeEventListener('click', Vars._onClick); } },
 };
 
 /* ---------- Projets ---------- */
@@ -194,19 +275,26 @@ const Dash = {
     else empty.hidden = true;
     Dash.widgets.forEach(w => Dash.grid.addWidget({ x: w.x, y: w.y, w: w.w || 4, h: w.h || 3, id: w.id, content: Dash.widgetHTML(w) }));
     Dash.grid.engine.nodes.forEach(n => { n.el.dataset.id = n.id; });
+    renderIcons(document.getElementById('grid')); // les en-têtes aussi : fill() ne couvre que les corps
     Dash.fill();
   },
   widgetHTML(w) {
-    const rm = App.isAdmin() ? `<button class="btn ghost small rm" onclick="Dash.remove_w('${w.id}')" ${Dash.editing ? '' : 'hidden'} aria-label="Retirer"><i data-icon="x"></i></button>` : '';
+    const tools = App.isAdmin() ? `<div class="widget-tools" ${Dash.editing ? '' : 'hidden'}>
+      <button class="icon-btn" onclick="Dash.editWidget('${w.id}')" aria-label="Modifier ce widget" title="Modifier"><i data-icon="settings"></i></button>
+      <button class="icon-btn" onclick="Dash.remove_w('${w.id}')" aria-label="Retirer ce widget" title="Retirer"><i data-icon="x"></i></button></div>` : '';
     const title = w.title || Dash.defaultTitle(w);
-    return `<div class="widget-head">${title ? `<h3>${App.esc(title)}</h3>` : ''}${rm}</div><div class="widget-body" data-wid="${w.id}"><div class="skeleton"></div></div>`;
+    return `<div class="widget-head">${title ? `<h3 data-wtitle="${w.id}">${Vars.resolveHTML(title)}</h3>` : ''}${tools}</div><div class="widget-body" data-wid="${w.id}"><div class="skeleton"></div></div>`;
   },
-  defaultTitle(w) { return { screens: 'Appareils', screen: 'Appareil', button: '', kpi: '', automations: 'Automatisations', events: 'Dernières notifications', note: '' }[w.type] ?? w.type; },
+  defaultTitle(w) { return { screens: 'Appareils', screen: 'Appareil', button: '', kpi: '', value: '', automations: 'Automatisations', events: 'Dernières notifications', note: '' }[w.type] ?? w.type; },
   async refresh() {
-    try { const [ov, ev] = await Promise.all([App.api('GET', `/api/projects/${PROJECT.id}/overview`), App.api('GET', `/api/projects/${PROJECT.id}/events?limit=8`)]); Dash.data = ov; Dash.data.events = ev; } catch { return; }
+    try { const [ov, ev] = await Promise.all([App.api('GET', `/api/projects/${PROJECT.id}/overview`), App.api('GET', `/api/projects/${PROJECT.id}/events?limit=8`), Vars.load()]); Dash.data = ov; Dash.data.events = ev; } catch { return; }
     Dash.fill();
   },
-  fill() { if (!Dash.data) return; document.querySelectorAll('.widget-body').forEach(el => { const w = Dash.widgets.find(x => x.id === el.dataset.wid); if (w) { el.innerHTML = Dash.body(w); renderIcons(el); } }); },
+  fill() {
+    if (!Dash.data) return;
+    document.querySelectorAll('.widget-body').forEach(el => { const w = Dash.widgets.find(x => x.id === el.dataset.wid); if (w) { el.innerHTML = Dash.body(w); renderIcons(el); } });
+    document.querySelectorAll('[data-wtitle]').forEach(el => { const w = Dash.widgets.find(x => x.id === el.dataset.wtitle); if (w) el.innerHTML = Vars.resolveHTML(w.title || Dash.defaultTitle(w)); });
+  },
   body(w) {
     const D = Dash.data;
     switch (w.type) {
@@ -217,11 +305,15 @@ const Dash = {
         return `<div class="kpi"><div class="value ${m[2]}">${m[0]}</div><div class="label">${m[1]}</div></div>`;
       }
       case 'screens': return D.devices.length ? `<div class="tiles">${D.devices.map(UI.deviceTile).join('')}</div>` : '<span class="muted">Aucun appareil approuvé.</span>';
-      case 'screen': { const d = D.devices.find(x => x.id == w.device_id); return d ? UI.deviceDetail(d) : '<span class="muted">Appareil introuvable ou non approuvé.</span>'; }
+      case 'screen': { const d = D.devices.find(x => x.id == w.device_id); return d ? UI.devState(d) : '<span class="muted">Appareil introuvable ou non approuvé.</span>'; }
       case 'button': { const a = D.actions.find(x => x.id == w.action_id); if (!a) return '<span class="muted">Action introuvable.</span>'; return `<div class="bigbtn"><button class="btn primary" onclick="Dash.run(${a.id}, this)"><i data-icon="play"></i>${App.esc(a.name)}</button><div class="muted small">${a.last_run ? App.rel(a.last_run) + ' · ' + App.esc(a.last_result) : 'jamais exécutée'}</div></div>`; }
       case 'automations': return D.automations.length ? `<table class="table" style="font-size:13px">${D.automations.map(a => `<tr><td style="padding:6px 0"><span class="dot ${a.enabled ? 'ok' : ''}"></span>${App.esc(a.name)}</td><td class="muted" style="padding:6px 8px">${App.esc(a.action_name)}</td><td class="muted small" style="padding:6px 0;text-align:right">${a.enabled ? App.esc(a.next_run) : 'désactivée'}</td></tr>`).join('')}</table>` : '<span class="muted">Aucune automatisation.</span>';
       case 'events': return D.events.length ? `<div class="event-list">${D.events.map(UI.eventRow).join('')}</div>` : '<span class="muted">Aucune notification.</span>';
-      case 'note': return `<div>${App.esc(w.text || '').replace(/\n/g, '<br>')}</div>`;
+      case 'note': return `<div>${Vars.resolveHTML(w.text || '').replace(/\n/g, '<br>')}</div>`;
+      case 'value': {
+        const v = Vars.resolveHTML(w.expr || '');
+        return `<div class="kpi"><div class="value">${v || '<span class="muted">—</span>'}${w.unit ? ` <span class="unit">${App.esc(w.unit)}</span>` : ''}</div>${w.label ? `<div class="label">${Vars.resolveHTML(w.label)}</div>` : ''}</div>`;
+      }
     }
     return '';
   },
@@ -229,30 +321,53 @@ const Dash = {
   toggleEdit() {
     Dash.editing = !Dash.editing; document.body.classList.toggle('editing', Dash.editing);
     Dash.grid.enableMove(Dash.editing); Dash.grid.enableResize(Dash.editing);
-    document.querySelectorAll('.widget-head .rm').forEach(b => b.hidden = !Dash.editing);
+    document.querySelectorAll('.widget-tools').forEach(b => b.hidden = !Dash.editing);
     if (!Dash.editing) { Dash.widgets = Dash.current && Array.isArray(Dash.current.layout) ? JSON.parse(JSON.stringify(Dash.current.layout)) : []; Dash.renderAll(); }
     Dash.setHeader();
   },
-  addWidget() {
+  addWidget() { Dash.editWidget(null); },
+  // Même formulaire pour la création et la modification : un widget en place s'ouvre pré-rempli.
+  editWidget(id) {
     const D = Dash.data || { devices: [], actions: [] };
-    App.modal(`<h2>Ajouter un widget</h2>
-      <label class="field"><span>Type</span><select id="w-type" onchange="Dash.onType()">
-        <option value="kpi">Indicateur</option><option value="screens">État de tous les appareils</option><option value="screen">Détail d'un appareil</option>
-        <option value="button">Bouton d'action</option><option value="events">Dernières notifications</option><option value="automations">Automatisations</option><option value="note">Note</option></select></label>
-      <label class="field" id="w-metric-l"><span>Indicateur</span><select id="w-metric"><option value="online">Appareils en ligne</option><option value="subko">Sous-appareils injoignables</option><option value="pending">En attente d'approbation</option><option value="relayed">Appareils relayés</option></select></label>
-      <label class="field"><span>Titre (optionnel)</span><input id="w-title"></label>
-      <label class="field" id="w-dev-l" hidden><span>Appareil</span><select id="w-dev">${D.devices.map(d => `<option value="${d.id}">${App.esc(d.name)}</option>`).join('')}</select></label>
-      <label class="field" id="w-act-l" hidden><span>Action</span><select id="w-act">${D.actions.map(a => `<option value="${a.id}">${App.esc(a.name)}</option>`).join('')}</select></label>
-      <label class="field" id="w-text-l" hidden><span>Texte</span><textarea id="w-text"></textarea></label>
-      <div class="modal-foot"><button class="btn" onclick="App.closeModal()">Annuler</button><button class="btn primary" onclick="Dash.confirmAdd()">Ajouter</button></div>`);
+    const w = id ? Dash.widgets.find(x => x.id === id) : null;
+    const t = w ? w.type : 'kpi';
+    const sel = (v, cur) => v === cur ? 'selected' : '';
+    const types = { kpi: 'Indicateur', screens: 'État de tous les appareils', screen: "Détail d'un appareil", button: "Bouton d'action", events: 'Dernières notifications', automations: 'Automatisations', value: 'Valeur (variable)', note: 'Note' };
+    App.modal(`<h2>${w ? 'Modifier le widget' : 'Ajouter un widget'}</h2>
+      <label class="field"><span>Type</span><select id="w-type" onchange="Dash.onType()">${Object.entries(types).map(([k, lbl]) => `<option value="${k}" ${sel(k, t)}>${lbl}</option>`).join('')}</select></label>
+      <label class="field" id="w-metric-l"><span>Indicateur</span><select id="w-metric">${[['online', 'Appareils en ligne'], ['subko', 'Sous-appareils injoignables'], ['pending', "En attente d'approbation"], ['relayed', 'Appareils relayés']].map(([k, lbl]) => `<option value="${k}" ${sel(k, w && w.metric)}>${lbl}</option>`).join('')}</select></label>
+      <label class="field"><span>Titre (optionnel)</span><input id="w-title" value="${App.esc(w && w.title || '')}"></label>
+      <label class="field" id="w-dev-l" hidden><span>Appareil</span><select id="w-dev">${D.devices.map(d => `<option value="${d.id}" ${w && w.device_id === d.id ? 'selected' : ''}>${App.esc(d.name)}</option>`).join('')}</select></label>
+      <label class="field" id="w-act-l" hidden><span>Action</span><select id="w-act">${D.actions.map(a => `<option value="${a.id}" ${w && w.action_id === a.id ? 'selected' : ''}>${App.esc(a.name)}</option>`).join('')}</select></label>
+      <label class="field" id="w-text-l" hidden><span>Texte <span class="faint">· {{ variables }} acceptées</span></span><textarea id="w-text">${App.esc(w && w.text || '')}</textarea>${Vars.btn('w-text')}</label>
+      <label class="field" id="w-expr-l" hidden><span>Valeur <span class="faint">· une ou plusieurs variables</span></span><input id="w-expr" value="${App.esc(w && w.expr || '')}" placeholder="{{ ecran_01.cpu }}">${Vars.btn('w-expr')}</label>
+      <div class="row" id="w-vrow" hidden><label class="field"><span>Unité (optionnel)</span><input id="w-unit" value="${App.esc(w && w.unit || '')}" placeholder="%"></label><label class="field"><span>Légende (optionnel)</span><input id="w-label" value="${App.esc(w && w.label || '')}" placeholder="CPU régie"></label></div>
+      <div class="modal-foot"><button class="btn" onclick="App.closeModal()">Annuler</button><button class="btn primary" onclick="Dash.confirmWidget(${w ? `'${w.id}'` : 'null'})">${w ? 'Enregistrer' : 'Ajouter'}</button></div>`);
+    Dash.onType();
   },
-  onType() { const t = App.val('w-type'); document.getElementById('w-metric-l').hidden = t !== 'kpi'; document.getElementById('w-dev-l').hidden = t !== 'screen'; document.getElementById('w-act-l').hidden = t !== 'button'; document.getElementById('w-text-l').hidden = t !== 'note'; },
-  confirmAdd() {
-    const t = App.val('w-type'); const size = { kpi: [3, 2], screens: [8, 4], screen: [5, 5], button: [3, 2], events: [4, 5], automations: [5, 3], note: [4, 2] }[t];
-    const w = { id: 'w' + Date.now().toString(36), type: t, title: App.val('w-title'), w: size[0], h: size[1] };
-    if (t === 'kpi') w.metric = App.val('w-metric'); if (t === 'screen') w.device_id = +App.val('w-dev'); if (t === 'button') w.action_id = +App.val('w-act'); if (t === 'note') w.text = App.val('w-text');
+  onType() { const t = App.val('w-type'); const h = (id, on) => document.getElementById(id).hidden = !on; h('w-metric-l', t === 'kpi'); h('w-dev-l', t === 'screen'); h('w-act-l', t === 'button'); h('w-text-l', t === 'note'); h('w-expr-l', t === 'value'); h('w-vrow', t === 'value'); },
+  confirmWidget(id) {
+    const t = App.val('w-type');
+    const cur = id ? Dash.widgets.find(x => x.id === id) : null;
+    const size = { kpi: [3, 2], screens: [8, 4], screen: [5, 5], button: [3, 2], events: [4, 5], automations: [5, 3], note: [4, 2], value: [3, 2] }[t];
+    // Objet reconstruit à neuf : un changement de type ne doit pas laisser traîner les champs de l'ancien.
+    const w = { id: cur ? cur.id : 'w' + Date.now().toString(36), type: t, title: App.val('w-title') };
+    if (cur) Object.assign(w, { x: cur.x, y: cur.y, w: cur.w, h: cur.h });
+    else Object.assign(w, { w: size[0], h: size[1] });
+    if (t === 'kpi') w.metric = App.val('w-metric');
+    if (t === 'screen') w.device_id = +App.val('w-dev');
+    if (t === 'button') w.action_id = +App.val('w-act');
+    if (t === 'note') w.text = App.val('w-text');
+    if (t === 'value') { w.expr = App.val('w-expr'); w.unit = App.val('w-unit'); w.label = App.val('w-label'); if (!w.expr.trim()) { App.toast('Indiquez au moins une variable', true); return; } }
     if ((t === 'screen' && !w.device_id) || (t === 'button' && !w.action_id)) { App.toast('Aucun élément disponible pour ce type', true); return; }
-    Dash.widgets.push(w); App.closeModal(); document.getElementById('dash-empty').hidden = true;
+    App.closeModal();
+    if (cur) {
+      Dash.widgets = Dash.widgets.map(x => x.id === w.id ? w : x);
+      Dash.renderAll();
+      if (Dash.editing) { Dash.grid.enableMove(true); Dash.grid.enableResize(true); }
+      return;
+    }
+    Dash.widgets.push(w); document.getElementById('dash-empty').hidden = true;
     const el = Dash.grid.addWidget({ w: w.w, h: w.h, id: w.id, content: Dash.widgetHTML(w) }); el.dataset.id = w.id;
     const n = Dash.grid.engine.nodes.find(n => n.id === w.id); if (n) Object.assign(w, { x: n.x, y: n.y }); Dash.fill(); renderIcons(el);
   },
@@ -271,9 +386,29 @@ const Dash = {
 
 /* ---------- Appareils ---------- */
 const Devices = {
-  list: [], open: new Set(), q: '',
-  init() { App.onSearch(q => { Devices.q = q; Devices.render(); }); Devices.refresh(); setInterval(Devices.refresh, 10000); },
-  async refresh() { Devices.list = await App.api('GET', `/api/projects/${PROJECT.id}/devices`); Devices.render(); },
+  list: [], open: new Set(), q: '', cmds: {}, shown: '', dirty: new Set(),
+  init() {
+    App.onSearch(q => { Devices.q = q; Devices.render(); });
+    const host = document.getElementById('device-list');
+    const edited = e => { const c = e.target.closest && e.target.closest('.pane-config'); if (c) Devices.markDirty(+c.closest('.device').dataset.id); };
+    host.addEventListener('input', edited); host.addEventListener('change', edited);
+    window.addEventListener('beforeunload', e => { if (Devices.dirty.size) { e.preventDefault(); e.returnValue = ''; } });
+    Devices.refresh(); setInterval(Devices.refresh, 10000);
+  },
+  cardEl(id) { return document.querySelector(`.device[data-id="${id}"]`); },
+  markDirty(id) { Devices.dirty.add(id); const el = Devices.cardEl(id); if (el) el.classList.add('dirty'); },
+  // Sauvegarde puis restaure le champ actif : reconstruire la liste déplace les nœuds conservés.
+  snapFocus() {
+    const el = document.activeElement;
+    if (!el || !el.closest || !el.closest('.pane-config')) return null;
+    let s = null, e = null; try { s = el.selectionStart; e = el.selectionEnd; } catch { }
+    return { el, s, e };
+  },
+  restoreFocus(f) {
+    if (!f || !f.el.isConnected) return;
+    f.el.focus(); if (f.s != null) { try { f.el.setSelectionRange(f.s, f.e); } catch { } }
+  },
+  async refresh() { Devices.list = await App.api('GET', `/api/projects/${PROJECT.id}/devices`); Devices.render(); [...Devices.open].forEach(Devices.loadCmds); },
   render() {
     const q = Devices.q; const match = d => !q || (d.name + ' ' + d.slug + ' ' + d.hostname + ' ' + d.tailnet_ip).toLowerCase().includes(q);
     const pend = Devices.list.filter(d => d.status === 'pending' && match(d));
@@ -284,50 +419,151 @@ const Devices = {
       ${App.isAdmin() ? `<div class="btnrow"><button class="btn primary" onclick="Devices.act(${d.id},'approve')"><i data-icon="check"></i>Approuver</button><button class="btn" onclick="Devices.act(${d.id},'reject')">Refuser</button></div>` : ''}</div>`).join('');
     const others = Devices.list.filter(d => d.status !== 'pending' && match(d));
     const host = document.getElementById('device-list');
-    if (!others.length) { host.innerHTML = Devices.list.length ? UI.empty('Aucun résultat', 'Aucun appareil ne correspond à la recherche.') : UI.empty('Aucun appareil', 'Installez l’agent avec la clé du projet : l’appareil apparaîtra ici en attente d’approbation.'); }
-    else host.innerHTML = others.map(Devices.card).join('');
+    if (!others.length) { host.innerHTML = Devices.list.length ? UI.empty('Aucun résultat', 'Aucun appareil ne correspond à la recherche.') : UI.empty('Aucun appareil', 'Installez l’agent avec la clé du projet : l’appareil apparaîtra ici en attente d’approbation.'); Devices.shown = ''; }
+    else if (others.map(d => d.id).join(',') === Devices.shown) others.forEach(d => Devices.patch(d));
+    else {
+      const keep = new Map();
+      host.querySelectorAll('.device').forEach(el => { const pane = el.querySelector('.pane-config'); if (pane && Devices.dirty.has(+el.dataset.id)) keep.set(+el.dataset.id, pane); });
+      const focus = Devices.snapFocus();
+      host.innerHTML = others.map(Devices.card).join('');
+      Devices.shown = others.map(d => d.id).join(',');
+      keep.forEach((pane, id) => { const fresh = host.querySelector(`.device[data-id="${id}"] .pane-config`); if (fresh) fresh.replaceWith(pane); });
+      Devices.restoreFocus(focus);
+      others.forEach(d => { if (Devices.open.has(d.id)) Devices.loadCmds(d.id); });
+    }
     renderIcons(host); renderIcons(document.getElementById('pending-list'));
   },
   card(d) {
-    const open = Devices.open.has(d.id); const subs = UI.subDevicesOf(d.last_heartbeat || {}); const ko = subs.filter(s => !s.reachable).length;
-    return `<div class="device" data-id="${d.id}"><div class="head" onclick="Devices.toggle(${d.id})">
-      <span class="dot ${d.status !== 'approved' ? 'warn' : d.online ? (ko ? 'warn' : 'ok') : 'danger'}"></span>
+    const open = Devices.open.has(d.id);
+    return `<div class="device${open ? ' open' : ''}${Devices.dirty.has(d.id) ? ' dirty' : ''}" data-id="${d.id}"><div class="head" onclick="Devices.toggle(${d.id})">${Devices.headInner(d)}</div>
+      ${open ? `<div class="body"><div class="pane pane-state">${Devices.stateInner(d)}</div><div class="pane pane-config">${Devices.configForm(d)}</div><div class="scan-pane" id="scan-${d.id}">${Devices.scanInner(d.id)}</div>${Devices.footInner(d)}</div>` : ''}</div>`;
+  },
+  headInner(d) {
+    const subs = UI.subDevicesOf(d.last_heartbeat || {}); const ko = subs.filter(s => !s.reachable).length;
+    return `<span class="dot ${d.status !== 'approved' ? 'warn' : d.online ? (ko ? 'warn' : 'ok') : 'danger'}"></span>
       <span><span class="name">${App.esc(d.name)}</span><span class="slug">${App.esc(d.slug)}</span></span>
       <span class="muted small hide-m">${subs.length ? (subs.length - ko) + '/' + subs.length + ' sous-appareils' : ''}</span>
       <span class="hide-m">${d.tailnet_ip ? `<code>${App.esc(d.tailnet_ip)}</code>` : ''}</span>
-      ${UI.status(d)}</div>
-      ${open ? `<div class="body"><div><h3>État</h3>${UI.deviceDetail(d)}<h3>Dernières commandes</h3><div class="cmds" id="cmds-${d.id}"><div class="skeleton"></div></div></div><div>${Devices.configForm(d)}</div></div>` : ''}</div>`;
+      ${UI.status(d)}<i class="chev" data-icon="chevron"></i>`;
   },
-  toggle(id) { Devices.open.has(id) ? Devices.open.delete(id) : Devices.open.add(id); const d = Devices.list.find(x => x.id === id); const el = document.querySelector(`.device[data-id="${id}"]`); el.outerHTML = Devices.card(d); renderIcons(document.getElementById('device-list')); if (Devices.open.has(id)) Devices.loadCmds(id); },
-  async loadCmds(id) { const cmds = await App.api('GET', `/api/devices/${id}/commands`); const el = document.getElementById('cmds-' + id); if (!el) return; el.innerHTML = cmds.length ? cmds.map(c => `<div>${UI.badge(c.status === 'done' ? 'ok' : c.status === 'failed' ? 'danger' : '', c.status)}<span>${App.esc(c.kind)}</span><span class="muted">${App.rel(c.created_at)}</span>${c.result ? `<span class="muted">· ${App.esc(c.result)}</span>` : ''}</div>`).join('') : '<span class="muted">aucune</span>'; },
+  stateInner(d) { return `${UI.devState(d)}<h3>Dernières commandes</h3><div class="cmds" id="cmds-${d.id}">${Devices.cmdsInner(d.id)}</div>`; },
+  // Le scan porte un résultat structuré : on montre le dernier en tableau plutôt qu'en ligne de journal.
+  scanInner(id) {
+    const c = (Devices.cmds[id] || []).find(x => x.kind === 'scan' && x.scan);
+    if (!c) { const p = (Devices.cmds[id] || []).find(x => x.kind === 'scan' && x.status === 'queued'); return p ? '<h3>Découverte réseau</h3><p class="muted small">Scan en file, exécuté au prochain heartbeat…</p>' : ''; }
+    const sc = c.scan;
+    const rows = sc.hosts.map(h => {
+      const port = (h.ports || [])[0] || '';
+      const quoi = h.known ? `<span class="badge ok">${App.esc(h.known)}</span>`
+        : h.vendor ? App.esc(h.vendor)
+        : h.random ? '<span class="muted">MAC aléatoire</span>' : '<span class="faint">—</span>';
+      const add = App.isAdmin() && !h.known
+        ? `<button class="btn ghost small" onclick="Devices.addFromScan(${id},'${App.esc(h.ip)}',${port || 0},'${App.esc((h.hostname || h.vendor || '').replace(/'/g, ''))}')">+ ajouter</button>` : '';
+      return `<div class="scan-row"><code>${App.esc(h.ip)}</code>
+        <span>${quoi}${h.hostname ? ` <span class="muted small">· ${App.esc(h.hostname)}</span>` : ''}</span>
+        <span class="muted small">${(h.ports || []).map(p => p + '/tcp').join(' · ') || '<span class="faint">aucun port ouvert</span>'}</span>
+        <span class="right">${add}</span></div>`;
+    }).join('');
+    return `<h3>Découverte réseau <span class="faint" style="text-transform:none;letter-spacing:0">· ${App.rel(c.created_at)}</span></h3>
+      <p class="muted small">${App.esc(c.result)}</p>
+      <div class="scan-list">${rows || '<p class="muted small">Aucun hôte trouvé.</p>'}</div>`;
+  },
+  async scan(id) {
+    if (!App.confirm('Lancer un balayage du réseau local de cet appareil ?\n\nL’agent teste chaque adresse de son sous-réseau. Sur un réseau fourni par un diffuseur, prévenez l’équipe technique : un balayage peut déclencher une alerte de sécurité.')) return;
+    await App.api('POST', `/api/devices/${id}/command`, { kind: 'scan' });
+    App.toast('Scan demandé, exécuté au prochain heartbeat (jusqu’à une minute)');
+    setTimeout(() => Devices.loadCmds(id), 1500);
+  },
+  // Pré-remplit une ligne de sous-appareil à partir d'un hôte découvert.
+  addFromScan(id, ip, port, nom) {
+    const card = Devices.cardEl(id); if (!card) return;
+    const h = card.querySelector('.subs');
+    h.insertAdjacentHTML('beforeend', Devices.subRow({ name: nom || '', ip, port: port || '', expose: true }, false, ''));
+    renderIcons(h); Devices.markDirty(id);
+    const row = h.lastElementChild;
+    row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    row.querySelector('.s-name').focus();
+    App.toast('Ligne ajoutée : complétez le nom puis enregistrez');
+  },
+  footInner(d) {
+    if (!App.isAdmin()) return '';
+    return `<div class="foot">
+      <div class="btnrow"><span class="foot-label">Commandes</span><button class="btn" onclick="Devices.cmd(${d.id},'probe')">Sonder</button><button class="btn" onclick="Devices.scan(${d.id})">Scanner le réseau</button><button class="btn" onclick="Devices.cmd(${d.id},'restart')">Redémarrer l'agent</button><button class="btn" onclick="Devices.cmd(${d.id},'update')">Mettre à jour</button></div>
+      <div class="btnrow">${d.status === 'approved' ? `<button class="btn danger-text" onclick="Devices.act(${d.id},'revoke')">Révoquer</button>` : `<button class="btn primary" onclick="Devices.act(${d.id},'approve')">Approuver</button>`}<button class="btn danger-text" onclick="Devices.remove(${d.id})">Supprimer</button></div></div>`;
+  },
+  // Rafraîchit tête et colonne d'état sans toucher au formulaire : sinon le poll écrase la saisie en cours.
+  patch(d) {
+    const el = document.querySelector(`.device[data-id="${d.id}"]`); if (!el) return;
+    el.querySelector('.head').innerHTML = Devices.headInner(d);
+    const st = el.querySelector('.pane-state'); if (st) st.innerHTML = Devices.stateInner(d);
+    const sc = el.querySelector('.scan-pane'); if (sc) sc.innerHTML = Devices.scanInner(d.id);
+    renderIcons(el);
+  },
+  rerender(id) {
+    const d = Devices.list.find(x => x.id === id); const el = document.querySelector(`.device[data-id="${id}"]`); if (!d || !el) return;
+    el.outerHTML = Devices.card(d); renderIcons(document.getElementById('device-list'));
+    if (Devices.open.has(id)) Devices.loadCmds(id);
+  },
+  toggle(id) {
+    if (Devices.open.has(id)) {
+      if (Devices.dirty.has(id) && !App.confirm('Fermer sans enregistrer ? Les modifications seront perdues.')) return;
+      Devices.open.delete(id); Devices.dirty.delete(id);
+    } else Devices.open.add(id);
+    Devices.rerender(id);
+  },
+  cmdsInner(id) {
+    const cmds = Devices.cmds[id];
+    if (!cmds) return '<div class="skeleton"></div>';
+    if (!cmds.length) return '<p class="muted small">Aucune commande envoyée.</p>';
+    return cmds.map(c => `<div>${UI.badge(c.status === 'done' ? 'ok' : c.status === 'failed' ? 'danger' : '', c.status)}<span>${App.esc(c.kind)}</span><span class="muted">${App.rel(c.created_at)}</span>${c.result ? `<span class="muted">· ${App.esc(c.result)}</span>` : ''}</div>`).join('');
+  },
+  async loadCmds(id) {
+    Devices.cmds[id] = await App.api('GET', `/api/devices/${id}/commands`);
+    const el = document.getElementById('cmds-' + id); if (el) el.innerHTML = Devices.cmdsInner(id);
+    const sc = document.getElementById('scan-' + id); if (sc) sc.innerHTML = Devices.scanInner(id);
+  },
   configForm(d) {
     const c = d.config; const ro = !App.isAdmin(); const dis = ro ? 'disabled' : '';
     return `<h3>Configuration à distance <span class="faint" style="text-transform:none;letter-spacing:0">· version ${d.config_version}</span></h3>
-      <div class="row"><label class="field"><span>Nom affiché</span><input id="c-name" value="${App.esc(c.name)}" ${dis}></label><label class="field"><span>Heartbeat (s)</span><input id="c-hb" type="number" value="${c.heartbeat_seconds || 15}" ${dis}></label></div>
-      <h3>Sous-appareils</h3>
-      <div class="fwd-row sub hdr"><span>nom</span><span>IP</span><span>port</span><span></span></div>
-      <div id="subs">${(c.sub_devices || []).map(sd => Devices.subRow(sd, ro)).join('')}</div>
-      ${ro ? '' : `<button class="btn ghost small" onclick="Devices.addSub()"><i data-icon="plus"></i>Sous-appareil</button>`}
-      <h3>Forwards <span class="faint" style="text-transform:none;letter-spacing:0">· IP privée de l'appareil → réseau local</span></h3>
-      <div class="fwd-row hdr"><span>nom</span><span>proto</span><span>port</span><span>cible</span><span></span></div>
-      <div id="fwds">${(c.forwards || []).map(f => Devices.fwdRow(f, ro)).join('')}</div>
-      ${ro ? '' : `<button class="btn ghost small" onclick="Devices.addFwd()"><i data-icon="plus"></i>Forward</button>`}
+      <div class="row"><label class="field"><span>Nom affiché</span><input class="c-name" value="${App.esc(c.name)}" ${dis}></label><label class="field"><span>Heartbeat (s)</span><input class="c-hb" type="number" value="${c.heartbeat_seconds || 15}" ${dis}></label></div>
+      <h3>Sous-appareils <span class="faint" style="text-transform:none;letter-spacing:0">· équipements du réseau local, surveillés par l'agent</span></h3>
+      <div class="fwd-row sub hdr"><span>nom</span><span>IP</span><span>port</span><span title="Ouvre un accès à cet équipement depuis le réseau privé">accès à distance</span><span>port d'écoute</span><span></span></div>
+      <div class="subs">${(c.sub_devices || []).map(sd => Devices.subRow(sd, ro, d.tailnet_ip)).join('')}</div>
+      ${ro ? '' : `<button class="btn ghost small" onclick="Devices.addSub(${d.id})"><i data-icon="plus"></i>Sous-appareil</button>`}
+      <details class="details" ${(c.forwards || []).some(f => !f.sub) ? 'open' : ''}><summary>Forwards libres (avancé)</summary>
+        <p class="muted small" style="margin-bottom:8px">Relais vers une cible qui n'est pas un sous-appareil, ou en UDP.</p>
+        <div class="fwd-row hdr"><span>nom</span><span>proto</span><span>port</span><span>cible</span><span></span></div>
+        <div class="fwds">${(c.forwards || []).filter(f => !f.sub).map(f => Devices.fwdRow(f, ro)).join('')}</div>
+        ${ro ? '' : `<button class="btn ghost small" onclick="Devices.addFwd(${d.id})"><i data-icon="plus"></i>Forward</button>`}
+      </details>
       <h3>Mises à jour</h3>
-      <div class="row"><label class="check"><input type="checkbox" id="c-upd" ${c.update && c.update.enabled ? 'checked' : ''} ${dis}> Mise à jour automatique</label><label class="field"><span>Vérification (heures)</span><input id="c-updh" type="number" value="${c.update && c.update.check_hours || 1}" ${dis}></label></div>
-      ${ro ? '' : `<div class="btnrow"><button class="btn primary" onclick="Devices.saveConfig(${d.id})">Enregistrer et appliquer</button>
-        <button class="btn" onclick="Devices.cmd(${d.id},'probe')">Sonder</button><button class="btn" onclick="Devices.cmd(${d.id},'restart')">Redémarrer l'agent</button><button class="btn" onclick="Devices.cmd(${d.id},'update')">Mettre à jour</button>
-        ${d.status === 'approved' ? `<button class="btn danger-text" onclick="Devices.act(${d.id},'revoke')">Révoquer</button>` : `<button class="btn primary" onclick="Devices.act(${d.id},'approve')">Approuver</button>`}
-        <button class="btn danger-text" onclick="Devices.remove(${d.id})">Supprimer</button></div>`}`;
+      <div class="row"><label class="check"><input type="checkbox" class="c-upd" ${c.update && c.update.enabled ? 'checked' : ''} ${dis}> Mise à jour automatique</label><label class="field"><span>Vérification (heures)</span><input class="c-updh" type="number" value="${c.update && c.update.check_hours || 1}" ${dis}></label></div>
+      ${ro ? '' : `<div class="btnrow save"><button class="btn primary" onclick="Devices.saveConfig(${d.id})">Enregistrer et appliquer</button>
+        <span class="muted small save-hint">appliqué au prochain heartbeat</span><span class="small dirty-flag">modifications non enregistrées</span></div>`}`;
   },
-  subRow(sd, ro) { const dis = ro ? 'disabled' : ''; return `<div class="fwd-row sub"><input class="s-name" value="${App.esc(sd.name)}" placeholder="Processeur LED" ${dis}><input class="s-ip" value="${App.esc(sd.ip)}" placeholder="192.168.0.10" ${dis}><input class="s-port" type="number" value="${sd.port || ''}" placeholder="37564" ${dis}>${ro ? '<span></span>' : '<button class="icon-btn" onclick="this.parentNode.remove()" aria-label="Retirer"><i data-icon="x"></i></button>'}</div>`; },
+  subRow(sd, ro, ip) {
+    const dis = ro ? 'disabled' : '';
+    const title = sd.expose && ip ? `title="Joignable sur ${ip}:${sd.listen || sd.port}"` : '';
+    return `<div class="fwd-row sub"><input class="s-name" value="${App.esc(sd.name)}" placeholder="Processeur LED" ${dis}><input class="s-ip" value="${App.esc(sd.ip)}" placeholder="192.168.0.10" ${dis}><input class="s-port" type="number" value="${sd.port || ''}" placeholder="37564" ${dis}>
+      <label class="check center" ${title}><input type="checkbox" class="s-expose" ${sd.expose ? 'checked' : ''} ${dis} onchange="Devices.toggleExpose(this)"></label>
+      <input class="s-listen" type="number" value="${sd.expose && sd.listen && sd.listen !== sd.port ? sd.listen : ''}" placeholder="${sd.port || 'idem'}" ${sd.expose ? '' : 'disabled'} ${dis}>
+      ${ro ? '<span></span>' : '<button class="icon-btn" onclick="this.parentNode.remove()" aria-label="Retirer"><i data-icon="x"></i></button>'}</div>`;
+  },
+  toggleExpose(cb) { const row = cb.closest('.fwd-row'); const l = row.querySelector('.s-listen'); l.disabled = !cb.checked; l.placeholder = row.querySelector('.s-port').value || 'idem'; if (!cb.checked) l.value = ''; },
   fwdRow(f, ro) { const dis = ro ? 'disabled' : ''; return `<div class="fwd-row"><input class="f-name" value="${App.esc(f.name)}" ${dis}><select class="f-proto" ${dis}><option ${f.proto === 'tcp' ? 'selected' : ''}>tcp</option><option ${f.proto === 'udp' ? 'selected' : ''}>udp</option></select><input class="f-listen" type="number" value="${f.listen || ''}" ${dis}><input class="f-target" value="${App.esc(f.target)}" placeholder="192.168.0.10:37564" ${dis}>${ro ? '<span></span>' : '<button class="icon-btn" onclick="this.parentNode.remove()" aria-label="Retirer"><i data-icon="x"></i></button>'}</div>`; },
-  addSub() { const h = document.getElementById('subs'); h.insertAdjacentHTML('beforeend', Devices.subRow({ name: '', ip: '', port: '' }, false)); renderIcons(h); },
-  addFwd() { const h = document.getElementById('fwds'); h.insertAdjacentHTML('beforeend', Devices.fwdRow({ name: '', proto: 'tcp', listen: '', target: '' }, false)); renderIcons(h); },
+  addSub(id) { const h = Devices.cardEl(id).querySelector('.subs'); h.insertAdjacentHTML('beforeend', Devices.subRow({ name: '', ip: '', port: '', expose: true }, false, '')); renderIcons(h); Devices.markDirty(id); },
+  addFwd(id) { const h = Devices.cardEl(id).querySelector('.fwds'); h.insertAdjacentHTML('beforeend', Devices.fwdRow({ name: '', proto: 'tcp', listen: '', target: '' }, false)); renderIcons(h); Devices.markDirty(id); },
   async saveConfig(id) {
-    const sub_devices = [...document.querySelectorAll('#subs .fwd-row.sub')].map(r => ({ name: r.querySelector('.s-name').value.trim(), ip: r.querySelector('.s-ip').value.trim(), port: +r.querySelector('.s-port').value })).filter(sd => sd.ip);
-    const forwards = [...document.querySelectorAll('#fwds .fwd-row:not(.hdr)')].map(r => ({ name: r.querySelector('.f-name').value.trim(), proto: r.querySelector('.f-proto').value, listen: +r.querySelector('.f-listen').value, target: r.querySelector('.f-target').value.trim() }));
-    await App.api('PUT', `/api/devices/${id}/config`, { name: App.val('c-name'), heartbeat_seconds: +App.val('c-hb'), sub_devices, forwards, update: { enabled: document.getElementById('c-upd').checked, check_hours: +App.val('c-updh') } });
-    App.toast('Configuration enregistrée, appliquée au prochain heartbeat'); Devices.refresh();
+    const card = Devices.cardEl(id); if (!card) return;
+    const v = sel => { const el = card.querySelector(sel); return el ? el.value : ''; };
+    const sub_devices = [...card.querySelectorAll('.subs .fwd-row.sub:not(.hdr)')].map(r => ({
+      name: r.querySelector('.s-name').value.trim(), ip: r.querySelector('.s-ip').value.trim(), port: +r.querySelector('.s-port').value,
+      expose: r.querySelector('.s-expose').checked, listen: +r.querySelector('.s-listen').value || 0,
+    })).filter(sd => sd.ip);
+    const forwards = [...card.querySelectorAll('.fwds .fwd-row:not(.hdr)')].map(r => ({ name: r.querySelector('.f-name').value.trim(), proto: r.querySelector('.f-proto').value, listen: +r.querySelector('.f-listen').value, target: r.querySelector('.f-target').value.trim() }));
+    await App.api('PUT', `/api/devices/${id}/config`, { name: v('.c-name'), heartbeat_seconds: +v('.c-hb'), sub_devices, forwards, update: { enabled: card.querySelector('.c-upd').checked, check_hours: +v('.c-updh') } });
+    Devices.dirty.delete(id);
+    App.toast('Configuration enregistrée, appliquée au prochain heartbeat'); await Devices.refresh(); Devices.rerender(id);
   },
   async act(id, what) { if (what === 'revoke' && !App.confirm('Révoquer cet appareil ? Il sera retiré du réseau privé et devra être ré-approuvé.')) return; await App.api('POST', `/api/devices/${id}/${what}`); App.toast({ approve: 'Appareil approuvé : il rejoint le réseau dans quelques secondes', reject: 'Appareil refusé', revoke: 'Appareil révoqué' }[what]); Devices.refresh(); },
   async cmd(id, kind) { await App.api('POST', `/api/devices/${id}/command`, { kind }); App.toast('Commande envoyée, exécutée au prochain heartbeat'); setTimeout(() => Devices.loadCmds(id), 1500); },
@@ -337,7 +573,7 @@ const Devices = {
 /* ---------- Actions ---------- */
 const Actions = {
   list: [], devices: [], q: '',
-  async init() { if (App.isAdmin()) App.setPrimary('Nouvelle action', () => Actions.edit()); App.onSearch(q => { Actions.q = q; Actions.render(); }); await Actions.load(); },
+  async init() { if (App.isAdmin()) App.setPrimary('Nouvelle action', () => Actions.edit()); App.onSearch(q => { Actions.q = q; Actions.render(); }); await Promise.all([Actions.load(), Vars.load()]); },
   async load() { [Actions.list, Actions.devices] = await Promise.all([App.api('GET', `/api/projects/${PROJECT.id}/actions`), App.api('GET', `/api/projects/${PROJECT.id}/devices`)]); Actions.render(); },
   render() {
     const host = document.getElementById('action-list'); const rows = Actions.list.filter(a => !Actions.q || (a.name + ' ' + a.url).toLowerCase().includes(Actions.q));
@@ -357,9 +593,9 @@ const Actions = {
       <div class="row"><label class="field"><span>Exécutée par</span><select id="a-kind" onchange="document.getElementById('a-dev-l').hidden=this.value!=='agent'"><option value="hub" ${a.kind === 'hub' ? 'selected' : ''}>le hub (API externe)</option><option value="agent" ${a.kind === 'agent' ? 'selected' : ''}>l'agent d'un appareil</option></select></label>
       <label class="field" id="a-dev-l" ${a.kind === 'agent' ? '' : 'hidden'}><span>Appareil</span><select id="a-dev">${Actions.devices.filter(d => d.status === 'approved').map(d => `<option value="${d.id}" ${a.device_id === d.id ? 'selected' : ''}>${App.esc(d.name)}</option>`).join('')}</select></label></div>
       <div class="row"><label class="field"><span>Méthode</span><select id="a-method">${['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map(m => `<option ${a.method === m ? 'selected' : ''}>${m}</option>`).join('')}</select></label><label class="field"><span>Délai (s)</span><input id="a-timeout" type="number" value="${a.timeout_seconds}"></label></div>
-      <label class="field"><span>URL</span><input id="a-url" value="${App.esc(a.url || '')}" placeholder="http://192.168.0.10/api/…"></label>
-      <label class="field"><span>En-têtes (JSON)</span><textarea id="a-headers">${App.esc(JSON.stringify(a.headers || {}, null, 1))}</textarea></label>
-      <label class="field"><span>Corps</span><textarea id="a-body">${App.esc(a.body || '')}</textarea></label>
+      <label class="field"><span>URL <span class="faint">· {{ variables }} acceptées</span></span><input id="a-url" value="${App.esc(a.url || '')}" placeholder="http://{{ ecran_01.subs.processeur.ip }}/api/…">${Vars.btn('a-url')}</label>
+      <label class="field"><span>En-têtes (JSON)</span><textarea id="a-headers">${App.esc(JSON.stringify(a.headers || {}, null, 1))}</textarea>${Vars.btn('a-headers')}</label>
+      <label class="field"><span>Corps</span><textarea id="a-body">${App.esc(a.body || '')}</textarea>${Vars.btn('a-body')}</label>
       <div class="modal-foot"><button class="btn" onclick="App.closeModal()">Annuler</button><button class="btn primary" onclick="Actions.save(${id || 0})">Enregistrer</button></div>`);
   },
   async save(id) {

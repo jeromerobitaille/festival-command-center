@@ -93,6 +93,104 @@ Opérateur (navigateur / Tessera Remote)
                   └─ heartbeat → dashboard
 ```
 
+## Variables
+
+Les appareils, sous-appareils et le projet exposent leur état sous forme de variables, utilisables
+dans les widgets du tableau de bord et dans les actions HTTP. Syntaxe : `{{ clé }}`.
+
+Le catalogue est construit **uniquement côté serveur** (`hub/dashboard/variables.go`) et servi par
+`GET /api/projects/{id}/variables`. Le navigateur ne calcule aucune valeur : il substitue sur cette
+table. Les actions sont résolues côté serveur au moment de l'exécution, donc les automatisations
+planifiées bénéficient des mêmes variables.
+
+Les clés dérivent du slug de l'appareil et du nom du sous-appareil, en minuscules, accents
+translittérés, séparateurs en `_` : « Régie – Façade » devient `regie_facade`.
+
+### Appareil — `{{ <appareil>.<champ> }}`
+
+| Champ | Exemple |
+|---|---|
+| `name` `slug` `status` `online` | `oui` / `non` pour `online` |
+| `ip` `hostname` `os` `arch` `agent` | `100.64.0.3` |
+| `lan_ip` `lan_cidr` | réseau local : `192.168.0.42`, `192.168.0.0/24` |
+| `cpu` `ram` | pourcentage sans unité : `24` |
+| `uptime` `last_seen` `age` | `10 j`, `2 min`, `12` (secondes) |
+| `heartbeat` `rustdesk` `relayed` | intervalle configuré, identifiant RustDesk |
+| `subs_total` `subs_ok` `subs_ko` | compteurs de sous-appareils |
+
+### Sous-appareil — `{{ <appareil>.subs.<sous-appareil>.<champ> }}`
+
+`name` `ip` `port` `target` `reachable` `rtt` `error` `access`
+
+`access` est l'adresse d'accès depuis le réseau privé (`100.64.0.3:37564`), vide si non exposé.
+
+### Projet — `{{ project.<champ> }}`
+
+`name` `slug` `timezone` `devices_total` `devices_online` `devices_offline` `pending` `subs_ko`
+
+### Comportement
+
+- **Clé connue mais sans valeur** (appareil hors ligne) : substituée par une chaîne vide.
+- **Clé inconnue** : laissée littérale et surlignée en rouge dans le tableau de bord ; côté action,
+  l'exécution est **refusée** plutôt que d'émettre une requête vers une URL trouée.
+- Une URL d'action dont le schéma résolu n'est pas `http`/`https`, ou sans hôte, est refusée : les
+  valeurs proviennent en partie des heartbeats, donc d'un agent.
+
+Exemple d'action réutilisable, au lieu d'une par appareil :
+
+```
+POST http://{{ ecran_01.subs.processeur.ip }}/api/power
+{"state":"off"}
+```
+
+## Découverte réseau
+
+L'agent peut balayer le réseau local de sa machine pour y trouver les équipements, et le
+portail propose de les déclarer comme sous-appareils en un clic.
+
+### Ce que fait l'agent
+
+`internal/scan` combine deux sources, sans socket brut ni dépendance externe :
+
+1. **Balayage TCP** sur une liste courte de ports (contrôle scénique, administration web,
+   accès distant). Identifie les services ouverts.
+2. **Table ARP du système**, relue après une sonde UDP qui force la résolution d'adresse.
+   Révèle les équipements muets en TCP et fournit leur adresse MAC.
+
+La seconde source fait la différence : sur un réseau d'essai, le balayage TCP seul trouvait
+3 hôtes là où l'ajout de l'ARP en trouve 25.
+
+La lecture ARP est en mode numérique (`arp -a -n`, `ip neigh` sous Linux) : sur BSD et macOS,
+`arp -a` résout le DNS inverse de chaque entrée, ce qui prend plusieurs secondes une fois le
+cache rempli par le balayage. Windows n'accepte pas `-n` et n'en a pas besoin.
+
+Le balayage est borné à 1024 adresses (`scan.MaxHosts`) et à 4 minutes.
+
+### Ce que fait le hub
+
+L'agent ne renvoie que des faits bruts. Le hub enrichit à la lecture (`scan.go`) :
+
+- **Fabricant** depuis le registre OUI de l'IEEE, embarqué compressé dans
+  `data/oui.tsv.gz` (40 105 entrées, 352 Ko). Régénérer avec `scripts/build-oui.sh`.
+- **Adresse aléatoire** : une MAC localement administrée (bit 0x02 du premier octet) est
+  signalée comme telle. Les téléphones récents en génèrent une par réseau ; aucun fabricant
+  n'en est déductible, et l'afficher comme « inconnu » serait trompeur.
+- **Déjà déclaré** : les hôtes correspondant à un sous-appareil existant sont marqués et ne
+  proposent pas d'ajout.
+
+La table OUI vit sur le hub et non dans l'agent : le binaire de l'agent part en OTA sur des
+liaisons de terrain, et la table peut ainsi être mise à jour sans redéployer les agents.
+
+### Variables associées
+
+`{{ <appareil>.lan_ip }}` et `{{ <appareil>.lan_cidr }}` exposent l'adresse et le sous-réseau
+local, distincts de `ip` qui est l'adresse du réseau privé.
+
+### Précaution d'exploitation
+
+Un balayage peut déclencher une alerte sur un réseau géré par un tiers. Le portail demande
+confirmation et le rappelle avant de lancer la commande.
+
 ## Phases
 
 1. **Agent MVP** : tsnet + proxy TCP configurable + heartbeat + service Windows. Test avec 1 laptop + 1 Tessera.

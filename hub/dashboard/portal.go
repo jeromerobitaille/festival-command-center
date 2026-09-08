@@ -86,6 +86,7 @@ func (s *Server) registerPortal(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/projects/{id}/devices", s.requireUser(s.withProject(s.apiListDevices)))
 	mux.HandleFunc("GET /api/projects/{id}/overview", s.requireUser(s.withProject(s.apiOverview)))
+	mux.HandleFunc("GET /api/projects/{id}/variables", s.requireUser(s.withProject(s.apiVariables)))
 	mux.HandleFunc("POST /api/devices/{id}/approve", s.requireAdmin(s.withDevice(s.apiApproveDevice)))
 	mux.HandleFunc("POST /api/devices/{id}/reject", s.requireAdmin(s.withDevice(func(w http.ResponseWriter, r *http.Request, d *Device) {
 		s.revokeDevice(r.Context(), d, "rejected")
@@ -499,6 +500,11 @@ func (s *Server) apiListDevices(w http.ResponseWriter, r *http.Request, p *Proje
 }
 
 // apiOverview : données du tableau de bord (appareils approuvés + actions + automatisations).
+func (s *Server) apiVariables(w http.ResponseWriter, r *http.Request, p *Project) {
+	devs, _ := s.listDevices(p.ID)
+	writeJSON(w, buildVariables(p, devs))
+}
+
 func (s *Server) apiOverview(w http.ResponseWriter, r *http.Request, p *Project) {
 	devs, _ := s.listDevices(p.ID)
 	approved := []*Device{}
@@ -547,6 +553,7 @@ func (s *Server) apiSaveDeviceConfig(w http.ResponseWriter, r *http.Request, d *
 	if cfg.HeartbeatSeconds < 5 {
 		cfg.HeartbeatSeconds = 15
 	}
+	names := map[string]bool{}
 	for i, sd := range cfg.SubDevices {
 		if net.ParseIP(strings.TrimSpace(sd.IP)) == nil {
 			jsonError(w, 400, fmt.Sprintf("sous-appareil %q : adresse IP invalide", sd.Name))
@@ -556,12 +563,22 @@ func (s *Server) apiSaveDeviceConfig(w http.ResponseWriter, r *http.Request, d *
 			jsonError(w, 400, fmt.Sprintf("sous-appareil %q : port invalide", sd.Name))
 			return
 		}
+		if sd.Expose && sd.Listen != 0 && (sd.Listen < 1 || sd.Listen > 65535) {
+			jsonError(w, 400, fmt.Sprintf("sous-appareil %q : port d'écoute invalide", sd.Name))
+			return
+		}
+		if names[sd.Name] {
+			jsonError(w, 400, fmt.Sprintf("deux sous-appareils portent le nom %q", sd.Name))
+			return
+		}
+		names[sd.Name] = true
 		cfg.SubDevices[i].IP = strings.TrimSpace(sd.IP)
 	}
+	cfg.buildForwards() // les accès des sous-appareils exposés + les forwards libres
 	if cfg.Update.CheckHours <= 0 {
 		cfg.Update.CheckHours = 1
 	}
-	seen := map[string]bool{}
+	seen := map[string]string{}
 	for i, f := range cfg.Forwards {
 		f.Proto = trimLower(f.Proto)
 		if f.Proto == "" {
@@ -575,12 +592,16 @@ func (s *Server) apiSaveDeviceConfig(w http.ResponseWriter, r *http.Request, d *
 			jsonError(w, 400, fmt.Sprintf("forward %d : nom, port d'écoute et cible host:port requis", i+1))
 			return
 		}
+		who := "forward « " + f.Name + " »"
+		if f.Sub != "" {
+			who = "sous-appareil « " + f.Sub + " »"
+		}
 		k := fmt.Sprintf("%s/%d", f.Proto, f.Listen)
-		if seen[k] {
-			jsonError(w, 400, "port d'écoute en double : "+k)
+		if other, dup := seen[k]; dup {
+			jsonError(w, 400, fmt.Sprintf("port %d déjà utilisé par %s : changez le port d'écoute de %s", f.Listen, other, who))
 			return
 		}
-		seen[k] = true
+		seen[k] = who
 		cfg.Forwards[i] = f
 	}
 	b, _ := json.Marshal(cfg)
@@ -599,7 +620,7 @@ func (s *Server) apiDeviceCommand(w http.ResponseWriter, r *http.Request, d *Dev
 		return
 	}
 	switch in.Kind {
-	case "restart", "update", "probe", "http_request":
+	case "restart", "update", "probe", "http_request", "scan":
 	default:
 		jsonError(w, 400, "commande inconnue")
 		return
@@ -625,6 +646,11 @@ func (s *Server) apiDeviceCommands(w http.ResponseWriter, r *http.Request, d *De
 			var payload string
 			rows.Scan(&c.ID, &c.DeviceID, &c.Kind, &payload, &c.Status, &c.Result, &c.CreatedAt)
 			c.Payload = json.RawMessage(payload)
+			if c.Kind == "scan" {
+				if res, summary := parseScan(c.Result, d); res != nil {
+					c.Scan, c.Result = res, summary
+				}
+			}
 			out = append(out, c)
 		}
 		rows.Close()
@@ -809,13 +835,16 @@ func boolInt(b bool) int {
 	return 0
 }
 
-
 // heartbeatHasSubDeviceKO : au moins un sous-appareil injoignable dans le dernier heartbeat
 // (champ sub_devices ; processor pour les agents ≤ 0.4).
 func heartbeatHasSubDeviceKO(raw json.RawMessage) bool {
 	var hb struct {
-		SubDevices []struct{ Reachable bool `json:"reachable"` } `json:"sub_devices"`
-		Processor  *struct{ Reachable bool `json:"reachable"` }  `json:"processor"`
+		SubDevices []struct {
+			Reachable bool `json:"reachable"`
+		} `json:"sub_devices"`
+		Processor *struct {
+			Reachable bool `json:"reachable"`
+		} `json:"processor"`
 	}
 	if json.Unmarshal(raw, &hb) != nil {
 		return false

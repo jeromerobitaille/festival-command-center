@@ -123,6 +123,14 @@ func (s *Server) RunAction(ctx context.Context, actionID int64, automationID *in
 	if err != nil {
 		return "action introuvable"
 	}
+	// Les variables sont résolues avant exécution : une action générique peut viser
+	// l'adresse d'un sous-appareil sans être dupliquée pour chaque appareil.
+	reqURL, headers, body, rerr := s.resolveAction(a)
+	if rerr != nil {
+		res := "erreur : " + rerr.Error()
+		s.db.Exec(`UPDATE actions SET last_run=?, last_result=? WHERE id=?`, now(), res, a.ID)
+		return res
+	}
 	var res string
 	switch a.Kind {
 	case "agent":
@@ -136,7 +144,7 @@ func (s *Server) RunAction(ctx context.Context, actionID int64, automationID *in
 			break
 		}
 		id, err := s.queueCommand(d.ID, "http_request", map[string]any{
-			"method": a.Method, "url": a.URL, "headers": a.Headers, "body": a.Body, "timeout_seconds": a.TimeoutSeconds,
+			"method": a.Method, "url": reqURL, "headers": headers, "body": body, "timeout_seconds": a.TimeoutSeconds,
 		}, &a.ID, automationID)
 		if err != nil {
 			res = "erreur : " + err.Error()
@@ -148,7 +156,7 @@ func (s *Server) RunAction(ctx context.Context, actionID int64, automationID *in
 			res = fmt.Sprintf("en file (commande %d) : envoyée à %s", id, d.Name)
 		}
 	default:
-		res = doHTTP(ctx, a.Method, a.URL, a.Headers, a.Body, time.Duration(a.TimeoutSeconds)*time.Second)
+		res = doHTTP(ctx, a.Method, reqURL, headers, body, time.Duration(a.TimeoutSeconds)*time.Second)
 	}
 	s.db.Exec(`UPDATE actions SET last_run=?, last_result=? WHERE id=?`, now(), res, a.ID)
 	return res

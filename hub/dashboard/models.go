@@ -38,10 +38,13 @@ type DeviceConfig struct {
 }
 
 // SubDeviceConf : équipement sur le réseau local de l'appareil (processeur LED, projecteur, automate…).
+// Expose ouvre en plus un accès depuis le réseau privé (l'agent reçoit le forward correspondant).
 type SubDeviceConf struct {
-	Name string `json:"name"`
-	IP   string `json:"ip"`
-	Port int    `json:"port"`
+	Name   string `json:"name"`
+	IP     string `json:"ip"`
+	Port   int    `json:"port"`
+	Expose bool   `json:"expose"`
+	Listen int    `json:"listen,omitempty"` // port d'écoute sur l'IP privée ; 0 = même que Port
 }
 
 // normalize fusionne l'ancien champ processor et complète les noms.
@@ -64,7 +67,71 @@ func (c *DeviceConfig) normalize() {
 		if c.SubDevices[i].Name == "" {
 			c.SubDevices[i].Name = fmt.Sprintf("sous-appareil %d", i+1)
 		}
+		c.SubDevices[i].Expose = false
+		c.SubDevices[i].Listen = 0
 	}
+	c.linkForwards()
+}
+
+// linkForwards rattache chaque forward à son sous-appareil : par le marqueur Sub, sinon (données
+// antérieures à la fusion) par cible identique. Les forwards non rattachés restent libres.
+func (c *DeviceConfig) linkForwards() {
+	byName := map[string]int{}
+	for i, sd := range c.SubDevices {
+		byName[sd.Name] = i
+	}
+	expose := func(i, listen int) {
+		c.SubDevices[i].Expose = true
+		c.SubDevices[i].Listen = listen
+	}
+	for i := range c.Forwards {
+		f := &c.Forwards[i]
+		if f.Sub != "" {
+			if j, ok := byName[f.Sub]; ok && !c.SubDevices[j].Expose {
+				expose(j, f.Listen)
+				continue
+			}
+			f.Sub = "" // sous-appareil renommé ou supprimé : le forward devient libre
+			continue
+		}
+		if f.Proto != "" && f.Proto != "tcp" {
+			continue
+		}
+		for j, sd := range c.SubDevices {
+			if !c.SubDevices[j].Expose && sd.IP != "" && f.Target == fmt.Sprintf("%s:%d", sd.IP, sd.Port) {
+				f.Sub = sd.Name
+				expose(j, f.Listen)
+				break
+			}
+		}
+	}
+}
+
+// buildForwards recompose la liste envoyée à l'agent : les accès dérivés des sous-appareils exposés,
+// puis les forwards libres. Appelé à l'enregistrement de la configuration.
+func (c *DeviceConfig) buildForwards() {
+	out := []ForwardConf{}
+	for i := range c.SubDevices {
+		sd := &c.SubDevices[i]
+		if !sd.Expose || sd.IP == "" || sd.Port <= 0 {
+			sd.Expose, sd.Listen = false, 0
+			continue
+		}
+		if sd.Listen <= 0 {
+			sd.Listen = sd.Port
+		}
+		name := slugify(sd.Name)
+		if name == "" {
+			name = fmt.Sprintf("acces-%d", i+1)
+		}
+		out = append(out, ForwardConf{Name: name, Proto: "tcp", Listen: sd.Listen, Target: fmt.Sprintf("%s:%d", sd.IP, sd.Port), Sub: sd.Name})
+	}
+	for _, f := range c.Forwards {
+		if f.Sub == "" {
+			out = append(out, f)
+		}
+	}
+	c.Forwards = out
 }
 
 // forAgent : copie envoyée aux agents, avec le champ processor pour les anciennes versions.
@@ -76,11 +143,13 @@ func (c DeviceConfig) forAgent() DeviceConfig {
 	}
 	return c
 }
+
 type ForwardConf struct {
 	Name   string `json:"name"`
 	Proto  string `json:"proto"`
 	Listen int    `json:"listen"`
 	Target string `json:"target"`
+	Sub    string `json:"sub,omitempty"` // sous-appareil d'origine ; vide = forward libre. Géré par le portail.
 }
 type UpdateConf struct {
 	Enabled    bool `json:"enabled"`
@@ -145,6 +214,8 @@ type Command struct {
 	Status    string          `json:"status"`
 	Result    string          `json:"result"`
 	CreatedAt string          `json:"created_at"`
+	// Résultat structuré d'une commande « scan » ; Result porte alors le résumé.
+	Scan *ScanResult `json:"scan,omitempty"`
 }
 
 // ---- requêtes ----
