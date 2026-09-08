@@ -11,20 +11,22 @@ Binaire unique, installé sur chaque appareil. Il :
 - exécute les commandes envoyées depuis le portail (requête HTTP locale, sonde, redémarrage, mise à jour) ;
 - s'installe comme service système (Windows, macOS, Linux) et redémarre seul en cas de perte réseau.
 
-## Installation sur un laptop Windows
+## Installation sur un appareil Windows
 
-1. Télécharger `festival-agent_<version>_windows_amd64.zip` de la dernière release GitHub et l'extraire dans un
-   dossier, par ex. `C:\festival\` (il contient `agent.exe` et `agent-tray.exe`).
-2. Double-cliquer `agent-tray.exe` : une icône apparaît dans la barre des tâches (elle se relance à chaque
-   ouverture de session). Tant qu'aucun service n'est installé, l'icône fait tourner l'agent elle-même dans
-   la session, ce qui permet de le configurer tout de suite. Menu de l'icône :
-   - **Installer le service (administrateur)** : l'agent démarre avec Windows, avant l'ouverture de session.
-   - **Entrer la clé de projet…** : ouvre le panneau dans une fenêtre de l'application (WebView2, intégré à
-     Windows 10/11 ; sinon le navigateur) où l'on colle la clé du projet, l'identifiant de l'appareil, l'IP du
-     sous-appareil, et où l'on voit/édite `agent.toml`.
-   - **Ouvrir le panneau** : statut, IP privée, dernier heartbeat, sous-appareil.
-3. Approuver l'appareil dans le portail (onglet Appareils du projet). Icône rouge = arrêté ou sans clé,
-   orange = en attente / connexion / sous-appareil injoignable, verte = en ligne.
+1. Télécharger `FestivalCommandCenter-Agent-Setup-<version>.exe` de la dernière release GitHub et le lancer
+   (droits administrateur demandés). L'installateur copie l'agent dans *Program Files*, enregistre le
+   service Windows, met l'icône dans la barre des tâches au démarrage de session et ouvre la fenêtre de
+   configuration.
+2. Dans la fenêtre : coller la clé du projet (portail, onglet Configuration du projet), donner un
+   identifiant et un nom à l'appareil, éventuellement un premier sous-appareil, puis « Enregistrer et
+   s'inscrire ».
+3. Approuver l'appareil dans le portail (onglet Appareils). Icône rouge = arrêté ou sans clé, orange = en
+   attente / connexion / un sous-appareil injoignable, verte = en ligne.
+
+Le menu de l'icône donne le statut, l'IP privée, l'état des sous-appareils, et ouvre la fenêtre
+« Configuration… » (contrôles Windows natifs, sans navigateur). Un panneau web équivalent reste
+disponible sur http://127.0.0.1:47632 pour les cas avancés. Désinstallation par *Ajout/Suppression de
+programmes*. Installation manuelle possible avec le zip `festival-agent_<version>_windows_amd64.zip`.
 
 Sans icône (Linux, macOS, ou en ligne de commande) : `agent check`, `agent install`, `agent panel`.
 
