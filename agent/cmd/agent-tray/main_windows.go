@@ -13,6 +13,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/festival/command-center/agent/internal/winexec"
 	"syscall"
 	"time"
 
@@ -35,14 +37,14 @@ var icoOffline []byte
 const localBase = "http://127.0.0.1:47632"
 
 type snapshot struct {
-	Version       string    `json:"version"`
-	Slug          string    `json:"slug"`
-	Name          string    `json:"name"`
-	PortalURL     string    `json:"portal_url"`
-	Phase         string    `json:"phase"`
-	Message       string    `json:"message"`
-	TailnetIP     string    `json:"tailnet_ip"`
-	SubDevices    []struct {
+	Version    string `json:"version"`
+	Slug       string `json:"slug"`
+	Name       string `json:"name"`
+	PortalURL  string `json:"portal_url"`
+	Phase      string `json:"phase"`
+	Message    string `json:"message"`
+	TailnetIP  string `json:"tailnet_ip"`
+	SubDevices []struct {
 		Name      string `json:"name"`
 		Reachable bool   `json:"reachable"`
 	} `json:"sub_devices"`
@@ -103,7 +105,7 @@ func startUserModeAgent() {
 		return
 	}
 	cmd := exec.Command(agent, "-config", configPath(), "run")
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000} // CREATE_NO_WINDOW
+	winexec.Hide(cmd)
 	if err := cmd.Start(); err == nil {
 		userAgent = cmd
 		go cmd.Wait()
@@ -264,7 +266,11 @@ func fetchStatus() (*snapshot, error) {
 }
 
 func serviceInstalled() bool {
-	out, err := exec.Command("sc", "query", "festival-agent").Output()
+	// Appelé toutes les 3-4 s par les boucles d'état de l'icône et de la fenêtre :
+	// sans masquage, chaque appel fait clignoter une console.
+	c := exec.Command("sc", "query", "festival-agent")
+	winexec.Hide(c)
+	out, err := c.Output()
 	return err == nil && strings.Contains(string(out), "STATE")
 }
 

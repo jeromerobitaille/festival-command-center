@@ -262,7 +262,9 @@ func (s *Server) handleProbeKey(w http.ResponseWriter, r *http.Request) {
 func (s *Server) approveDevice(ctx context.Context, d *Device) error {
 	key := ""
 	if s.hs.enabled() {
-		k, err := s.hs.PreauthKey(ctx, false, 24*time.Hour)
+		hctx, cancel := context.WithTimeout(ctx, hsTimeout)
+		defer cancel()
+		k, err := s.hs.PreauthKey(hctx, false, 24*time.Hour)
 		if err != nil {
 			return err
 		}
@@ -275,17 +277,35 @@ func (s *Server) approveDevice(ctx context.Context, d *Device) error {
 	return err
 }
 
-func (s *Server) revokeDevice(ctx context.Context, d *Device, status string) error {
-	if s.hs.enabled() {
-		if err := s.hs.DeleteNodes(ctx, d.Slug, d.Slug+"-probe"); err != nil {
-			log.Printf("[headscale] retrait des noeuds de %s : %v", d.Slug, err)
-		}
-	}
+// hsTimeout borne les appels Headscale faits pendant une requête du portail. Sans cette
+// borne, un Headscale injoignable bloque la réponse pendant le timeout du client (15 s)
+// multiplié par le nombre d'appels : la page finit par épuiser ses connexions et se fige.
+const hsTimeout = 5 * time.Second
+
+// revokeDevice retire l'appareil du réseau privé et change son statut.
+//
+// L'écriture en base est faite d'abord : c'est l'état dont dépend le portail, et il ne doit
+// pas être otage de la disponibilité de Headscale. Le retrait des nœuds suit, borné dans le
+// temps. Son échec est remonté à l'appelant plutôt que seulement journalisé : un appareil
+// révoqué qui reste sur le réseau privé est un fait que l'opérateur doit connaître.
+func (s *Server) revokeDevice(ctx context.Context, d *Device, status string) (string, error) {
 	_, err := s.db.Exec(`UPDATE devices SET status=?, headscale_key='', headscale_key_delivered=0, tailnet_ip='' WHERE id=?`, status, d.ID)
-	if err == nil {
-		s.logEvent(d.ProjectID, &d.ID, "device."+status, "warn", fmt.Sprintf("Appareil « %s » %s", d.Name, map[string]string{"revoked": "révoqué", "rejected": "refusé"}[status]))
+	if err != nil {
+		return "", err
 	}
-	return err
+	s.logEvent(d.ProjectID, &d.ID, "device."+status, "warn", fmt.Sprintf("Appareil « %s » %s", d.Name, map[string]string{"revoked": "révoqué", "rejected": "refusé"}[status]))
+	if !s.hs.enabled() {
+		return "", nil
+	}
+	hctx, cancel := context.WithTimeout(ctx, hsTimeout)
+	defer cancel()
+	if err := s.hs.DeleteNodes(hctx, d.Slug, d.Slug+"-probe"); err != nil {
+		log.Printf("[headscale] retrait des noeuds de %s : %v", d.Slug, err)
+		s.logEvent(d.ProjectID, &d.ID, "device."+status, "error",
+			fmt.Sprintf("« %s » : retrait du réseau privé impossible, le nœud y est peut-être encore (%v)", d.Name, err))
+		return "le nœud n'a pas pu être retiré du réseau privé : " + err.Error(), nil
+	}
+	return "", nil
 }
 
 // trackTransitions journalise les passages en ligne / hors ligne et l'état des sous-appareils.

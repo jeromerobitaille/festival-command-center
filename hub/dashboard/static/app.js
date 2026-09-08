@@ -30,7 +30,10 @@ const App = {
   async api(method, url, body) {
     const opt = { method, headers: {} };
     if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
-    const r = await fetch(url, opt);
+    opt.signal = AbortSignal.timeout(30000);
+    let r;
+    try { r = await fetch(url, opt); }
+    catch (e) { const m = e.name === 'TimeoutError' ? 'Le serveur ne répond pas (30 s)' : 'Requête impossible : ' + e.message; App.toast(m, true); throw new Error(m); }
     if (r.status === 401) { location.href = '/login?next=' + encodeURIComponent(location.pathname); throw new Error('session expirée'); }
     const text = await r.text();
     let data = null; try { data = text ? JSON.parse(text) : null; } catch { data = text; }
@@ -416,7 +419,7 @@ const Devices = {
     document.getElementById('pending-list').innerHTML = pend.map(d => `<div class="card"><h2>${App.esc(d.slug)}</h2>
       <dl class="kv"><dt>Nom d'hôte</dt><dd>${App.esc(d.hostname)}</dd><dt>Système</dt><dd>${App.esc(d.os)} ${App.esc(d.arch)}</dd><dt>Agent</dt><dd>${App.esc(d.agent_version)}</dd><dt>Inscrit</dt><dd>${App.rel(d.enrolled_at)}</dd>
       <dt>Sous-appareils</dt><dd>${(d.config.sub_devices || []).map(sd => App.esc(sd.name + ' ' + sd.ip + ':' + sd.port)).join('<br>') || '—'}</dd></dl>
-      ${App.isAdmin() ? `<div class="btnrow"><button class="btn primary" onclick="Devices.act(${d.id},'approve')"><i data-icon="check"></i>Approuver</button><button class="btn" onclick="Devices.act(${d.id},'reject')">Refuser</button></div>` : ''}</div>`).join('');
+      ${App.isAdmin() ? `<div class="btnrow"><button class="btn primary" onclick="Devices.act(${d.id},'approve',this)"><i data-icon="check"></i>Approuver</button><button class="btn" onclick="Devices.act(${d.id},'reject',this)">Refuser</button></div>` : ''}</div>`).join('');
     const others = Devices.list.filter(d => d.status !== 'pending' && match(d));
     const host = document.getElementById('device-list');
     if (!others.length) { host.innerHTML = Devices.list.length ? UI.empty('Aucun résultat', 'Aucun appareil ne correspond à la recherche.') : UI.empty('Aucun appareil', 'Installez l’agent avec la clé du projet : l’appareil apparaîtra ici en attente d’approbation.'); Devices.shown = ''; }
@@ -489,7 +492,7 @@ const Devices = {
     if (!App.isAdmin()) return '';
     return `<div class="foot">
       <div class="btnrow"><span class="foot-label">Commandes</span><button class="btn" onclick="Devices.cmd(${d.id},'probe')">Sonder</button><button class="btn" onclick="Devices.scan(${d.id})">Scanner le réseau</button><button class="btn" onclick="Devices.cmd(${d.id},'restart')">Redémarrer l'agent</button><button class="btn" onclick="Devices.cmd(${d.id},'update')">Mettre à jour</button></div>
-      <div class="btnrow">${d.status === 'approved' ? `<button class="btn danger-text" onclick="Devices.act(${d.id},'revoke')">Révoquer</button>` : `<button class="btn primary" onclick="Devices.act(${d.id},'approve')">Approuver</button>`}<button class="btn danger-text" onclick="Devices.remove(${d.id})">Supprimer</button></div></div>`;
+      <div class="btnrow">${d.status === 'approved' ? `<button class="btn" onclick="Devices.rekey(${d.id},this)" title="Quand l'agent affiche « approuvé mais aucune clé réseau reçue »">Nouvelle clé réseau</button><button class="btn danger-text" onclick="Devices.act(${d.id},'revoke',this)">Révoquer</button>` : `<button class="btn primary" onclick="Devices.act(${d.id},'approve',this)">Approuver</button>`}<button class="btn danger-text" onclick="Devices.remove(${d.id},this)">Supprimer</button></div></div>`;
   },
   // Rafraîchit tête et colonne d'état sans toucher au formulaire : sinon le poll écrase la saisie en cours.
   patch(d) {
@@ -565,9 +568,43 @@ const Devices = {
     Devices.dirty.delete(id);
     App.toast('Configuration enregistrée, appliquée au prochain heartbeat'); await Devices.refresh(); Devices.rerender(id);
   },
-  async act(id, what) { if (what === 'revoke' && !App.confirm('Révoquer cet appareil ? Il sera retiré du réseau privé et devra être ré-approuvé.')) return; await App.api('POST', `/api/devices/${id}/${what}`); App.toast({ approve: 'Appareil approuvé : il rejoint le réseau dans quelques secondes', reject: 'Appareil refusé', revoke: 'Appareil révoqué' }[what]); Devices.refresh(); },
+  async act(id, what, btn) {
+    if (what === 'revoke' && !App.confirm('Révoquer cet appareil ? Il sera retiré du réseau privé et devra être ré-approuvé.')) return;
+    await Devices.busy(btn, async () => {
+      const r = await App.api('POST', `/api/devices/${id}/${what}`);
+      App.toast({ approve: 'Appareil approuvé : il rejoint le réseau dans quelques secondes', reject: 'Appareil refusé', revoke: 'Appareil révoqué' }[what]);
+      if (r && r.warning) App.toast(r.warning, true);
+      Devices.dirty.delete(id); await Devices.refresh();
+    });
+  },
+  // Émet une nouvelle clé réseau sans révoquer : cas de l'agent approuvé qui a perdu son état local.
+  async rekey(id, btn) {
+    if (!App.confirm('Émettre une nouvelle clé réseau pour cet appareil ?\n\nÀ utiliser quand l’agent affiche « approuvé mais aucune clé réseau reçue ». L’appareil reste approuvé et n’est pas retiré du réseau.')) return;
+    await Devices.busy(btn, async () => {
+      await App.api('POST', `/api/devices/${id}/rekey`);
+      App.toast('Nouvelle clé émise : l’agent la récupérera à sa prochaine tentative');
+      await Devices.refresh();
+    });
+  },
+  async busy(btn, fn) {
+    const card = btn && btn.closest('.device'); const all = card ? [...card.querySelectorAll('.foot button')] : (btn ? [btn] : []);
+    const was = all.map(b => b.disabled); all.forEach(b => b.disabled = true);
+    if (btn) { btn.dataset.label = btn.textContent; btn.textContent = 'En cours…'; }
+    try { await fn(); } catch { /* le message a déjà été affiché */ }
+    finally {
+      all.forEach((b, i) => { if (b.isConnected) b.disabled = was[i]; });
+      if (btn && btn.isConnected && btn.dataset.label) { btn.textContent = btn.dataset.label; delete btn.dataset.label; }
+    }
+  },
   async cmd(id, kind) { await App.api('POST', `/api/devices/${id}/command`, { kind }); App.toast('Commande envoyée, exécutée au prochain heartbeat'); setTimeout(() => Devices.loadCmds(id), 1500); },
-  async remove(id) { if (!App.confirm('Supprimer définitivement cet appareil du projet ?')) return; await App.api('DELETE', `/api/devices/${id}`); Devices.open.delete(id); Devices.refresh(); },
+  async remove(id, btn) {
+    if (!App.confirm('Supprimer définitivement cet appareil du projet ?')) return;
+    await Devices.busy(btn, async () => {
+      const r = await App.api('DELETE', `/api/devices/${id}`);
+      if (r && r.warning) App.toast(r.warning, true);
+      Devices.open.delete(id); Devices.dirty.delete(id); Devices.shown = ''; await Devices.refresh();
+    });
+  },
 };
 
 /* ---------- Actions ---------- */

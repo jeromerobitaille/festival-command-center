@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
+
+	"github.com/festival/command-center/agent/internal/winexec"
 	"regexp"
 	"runtime"
 	"sort"
@@ -213,7 +215,9 @@ func arpTable(ctx context.Context) map[string]string {
 	}
 	out := map[string]string{}
 	for _, c := range cmds {
-		b, err := exec.CommandContext(cctx, c[0], c[1:]...).Output()
+		cmd := exec.CommandContext(cctx, c[0], c[1:]...)
+		winexec.Hide(cmd)
+		b, err := cmd.Output()
 		if err != nil {
 			continue
 		}

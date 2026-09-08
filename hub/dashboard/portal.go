@@ -3,6 +3,7 @@ package main
 // Pages HTML et API JSON du portail (utilisateurs connectés).
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -89,19 +90,20 @@ func (s *Server) registerPortal(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/projects/{id}/variables", s.requireUser(s.withProject(s.apiVariables)))
 	mux.HandleFunc("POST /api/devices/{id}/approve", s.requireAdmin(s.withDevice(s.apiApproveDevice)))
 	mux.HandleFunc("POST /api/devices/{id}/reject", s.requireAdmin(s.withDevice(func(w http.ResponseWriter, r *http.Request, d *Device) {
-		s.revokeDevice(r.Context(), d, "rejected")
-		writeJSON(w, map[string]string{"status": "rejected"})
+		warn, _ := s.revokeDevice(r.Context(), d, "rejected")
+		writeJSON(w, map[string]string{"status": "rejected", "warning": warn})
 	})))
 	mux.HandleFunc("POST /api/devices/{id}/revoke", s.requireAdmin(s.withDevice(func(w http.ResponseWriter, r *http.Request, d *Device) {
-		s.revokeDevice(r.Context(), d, "revoked")
-		writeJSON(w, map[string]string{"status": "revoked"})
+		warn, _ := s.revokeDevice(r.Context(), d, "revoked")
+		writeJSON(w, map[string]string{"status": "revoked", "warning": warn})
 	})))
 	mux.HandleFunc("DELETE /api/devices/{id}", s.requireAdmin(s.withDevice(func(w http.ResponseWriter, r *http.Request, d *Device) {
-		s.revokeDevice(r.Context(), d, "revoked")
+		warn, _ := s.revokeDevice(r.Context(), d, "revoked")
 		s.db.Exec(`DELETE FROM commands WHERE device_id=?`, d.ID)
 		s.db.Exec(`DELETE FROM devices WHERE id=?`, d.ID)
-		w.WriteHeader(204)
+		writeJSON(w, map[string]string{"status": "deleted", "warning": warn})
 	})))
+	mux.HandleFunc("POST /api/devices/{id}/rekey", s.requireAdmin(s.withDevice(s.apiRekeyDevice)))
 	mux.HandleFunc("PUT /api/devices/{id}/config", s.requireAdmin(s.withDevice(s.apiSaveDeviceConfig)))
 	mux.HandleFunc("POST /api/devices/{id}/command", s.requireAdmin(s.withDevice(s.apiDeviceCommand)))
 	mux.HandleFunc("GET /api/devices/{id}/commands", s.requireUser(s.withDevice(s.apiDeviceCommands)))
@@ -539,6 +541,36 @@ func (s *Server) apiApproveDevice(w http.ResponseWriter, r *http.Request, d *Dev
 	}
 	log.Printf("[portail] %s approuve l'appareil %s", currentUser(r).Username, d.Slug)
 	writeJSON(w, map[string]string{"status": "approved"})
+}
+
+// apiRekeyDevice émet une nouvelle clé de pré-auth pour un appareil déjà approuvé.
+//
+// La clé n'est livrée qu'une fois puis effacée : un agent qui perd son état local
+// (réinstallation, dossier d'état vidé) se retrouve approuvé sans clé, et son seul recours
+// était de révoquer puis ré-approuver — ce qui le sort du réseau privé au passage.
+func (s *Server) apiRekeyDevice(w http.ResponseWriter, r *http.Request, d *Device) {
+	if d.Status != "approved" {
+		jsonError(w, 400, "l'appareil doit être approuvé")
+		return
+	}
+	if !s.hs.enabled() {
+		jsonError(w, 503, "Headscale n'est pas configuré sur ce hub : aucune clé ne peut être émise")
+		return
+	}
+	hctx, cancel := context.WithTimeout(r.Context(), hsTimeout)
+	defer cancel()
+	key, err := s.hs.PreauthKey(hctx, false, 24*time.Hour)
+	if err != nil {
+		jsonError(w, 502, "Headscale : "+err.Error())
+		return
+	}
+	if _, err := s.db.Exec(`UPDATE devices SET headscale_key=?, headscale_key_delivered=0 WHERE id=?`, key, d.ID); err != nil {
+		jsonError(w, 500, err.Error())
+		return
+	}
+	s.logEvent(d.ProjectID, &d.ID, "device.rekey", "info", fmt.Sprintf("Nouvelle clé réseau émise pour « %s »", d.Name))
+	log.Printf("[portail] %s émet une nouvelle clé réseau pour %s", currentUser(r).Username, d.Slug)
+	writeJSON(w, map[string]string{"status": "ok"})
 }
 
 func (s *Server) apiSaveDeviceConfig(w http.ResponseWriter, r *http.Request, d *Device) {

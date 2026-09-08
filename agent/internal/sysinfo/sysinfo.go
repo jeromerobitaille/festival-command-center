@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/festival/command-center/agent/internal/scan"
+	"github.com/festival/command-center/agent/internal/winexec"
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/host"
 	"github.com/shirou/gopsutil/v4/mem"
@@ -60,7 +61,9 @@ func RustDeskID(ctx context.Context) string {
 	}
 	for _, bin := range candidates {
 		cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		out, err := exec.CommandContext(cctx, bin, "--get-id").Output()
+		c := exec.CommandContext(cctx, bin, "--get-id")
+		winexec.Hide(c)
+		out, err := c.Output()
 		cancel()
 		if err == nil {
 			if id := strings.TrimSpace(string(out)); id != "" {
