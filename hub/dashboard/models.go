@@ -45,6 +45,21 @@ type SubDeviceConf struct {
 	Port   int    `json:"port"`
 	Expose bool   `json:"expose"`
 	Listen int    `json:"listen,omitempty"` // port d'écoute sur l'IP privée ; 0 = même que Port
+	// Sondes de lecture interrogées par l'agent à chaque heartbeat.
+	Readings []ReadingConf `json:"readings,omitempty"`
+}
+
+// ReadingConf : requête HTTP vers l'équipement dont on extrait une valeur affichable.
+// L'extraction se fait par chemin JSON pointé, sinon par expression régulière (premier
+// groupe capturant), sinon le corps entier est pris tel quel.
+type ReadingConf struct {
+	Name   string `json:"name"`
+	Method string `json:"method,omitempty"`
+	Path   string `json:"path"`
+	Body   string `json:"body,omitempty"`
+	JSON   string `json:"json,omitempty"`
+	Regex  string `json:"regex,omitempty"`
+	Unit   string `json:"unit,omitempty"`
 }
 
 // normalize fusionne l'ancien champ processor et complète les noms.
@@ -191,6 +206,7 @@ type Action struct {
 	TimeoutSeconds int               `json:"timeout_seconds"`
 	LastRun        string            `json:"last_run"`
 	LastResult     string            `json:"last_result"`
+	NeedsValue     bool              `json:"needs_value"` // référence {{ value }}
 }
 
 type Automation struct {
@@ -376,6 +392,7 @@ func scanAction(row interface{ Scan(...any) error }) (*Action, error) {
 	}
 	a.Headers = map[string]string{}
 	json.Unmarshal([]byte(hdr), &a.Headers)
+	a.NeedsValue = ActionNeedsValue(a)
 	return a, nil
 }
 func (s *Server) getAction(id int64) (*Action, error) {

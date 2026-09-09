@@ -119,13 +119,19 @@ func (sc *Scheduler) runAutomation(id int64) {
 // RunAction exécute une action : côté hub (requête HTTP directe) ou côté agent (commande en file).
 // Retourne un résumé texte stocké comme dernier résultat.
 func (s *Server) RunAction(ctx context.Context, actionID int64, automationID *int64) string {
+	return s.RunActionWith(ctx, actionID, automationID, nil)
+}
+
+// RunActionWith exécute une action en fournissant un paramètre d'exécution, substitué à
+// {{ value }}. Un curseur du tableau de bord s'en sert pour transmettre sa position.
+func (s *Server) RunActionWith(ctx context.Context, actionID int64, automationID *int64, value *float64) string {
 	a, err := s.getAction(actionID)
 	if err != nil {
 		return "action introuvable"
 	}
 	// Les variables sont résolues avant exécution : une action générique peut viser
 	// l'adresse d'un sous-appareil sans être dupliquée pour chaque appareil.
-	reqURL, headers, body, rerr := s.resolveAction(a)
+	reqURL, headers, body, rerr := s.resolveAction(a, value)
 	if rerr != nil {
 		res := "erreur : " + rerr.Error()
 		s.db.Exec(`UPDATE actions SET last_run=?, last_result=? WHERE id=?`, now(), res, a.ID)

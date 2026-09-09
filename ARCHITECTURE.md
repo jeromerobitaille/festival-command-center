@@ -191,6 +191,60 @@ local, distincts de `ip` qui est l'adresse du réseau privé.
 Un balayage peut déclencher une alerte sur un réseau géré par un tiers. Le portail demande
 confirmation et le rappelle avant de lancer la commande.
 
+## Tableaux de bord d'exploitation
+
+Quatre types de widgets pilotés par les variables, pour construire une vue de régie :
+**liste de voyants**, **voyant seul**, **jauge** et **curseur**.
+
+### Condition d'un voyant
+
+Un voyant compare la valeur résolue d'une variable à une chaîne attendue :
+vert si égale à « vert si », ambre si égale à « ambre si », gris si la variable est vide
+(donnée absente, ce qui se distingue d'une panne), rouge sinon.
+
+La liste de voyants se saisit une ligne par voyant, format `Libellé | condition | valeur` :
+
+```
+Cabane 1 | {{ regie.subs.cabane_1.reachable }} | {{ regie.subs.cabane_1.readings.nits }} nits
+Cabane 2 | {{ regie.subs.cabane_2.reachable }} | {{ regie.subs.cabane_2.readings.nits }} nits
+```
+
+Si aucune variable d'une valeur ne résout, la ligne affiche « — » plutôt que l'unité seule.
+
+### Sondes de lecture
+
+Une valeur lue sur un équipement vient d'une sonde déclarée sur un sous-appareil, dans la
+configuration de l'appareil. L'agent l'interroge en HTTP à chaque heartbeat, en parallèle,
+et seulement si le sous-appareil répond au préalable en TCP — sinon chaque sonde attendrait
+son propre délai et retarderait le heartbeat d'autant.
+
+L'extraction se fait par chemin JSON pointé (`data.brightness`, `items.0.value`), ou par
+expression régulière si le champ est encadré de barres obliques (`/nits=(\d+)/`), ou à
+défaut le corps entier. Le résultat devient
+`{{ <appareil>.subs.<sous-appareil>.readings.<sonde> }}`.
+
+Une sonde en échec donne une variable **vide**, pas un message d'erreur : un tableau de bord
+n'a pas à afficher une pile réseau. L'erreur reste consultable en
+`…readings.<sonde>.error`.
+
+### Curseur et paramètre d'action
+
+Un curseur envoie sa position à une action au relâchement, dans `{{ value }}` :
+
+```
+POST http://{{ regie.subs.cabane_1.ip }}/api/brightness
+{"value": {{ value }}}
+```
+
+Le paramètre est **restreint à un nombre**, volontairement. Il vient du navigateur d'un
+utilisateur qui n'est pas forcément administrateur et il est injecté dans une URL et un
+corps de requête ; un nombre ne peut pas les détourner. Une action référençant
+`{{ value }}` échoue tant qu'aucune valeur n'est fournie, plutôt que d'envoyer le
+littéral à l'équipement.
+
+Le champ « position lue » permet d'afficher la valeur réelle de l'équipement plutôt que la
+dernière consigne envoyée, quand une sonde la remonte.
+
 ## Phases
 
 1. **Agent MVP** : tsnet + proxy TCP configurable + heartbeat + service Windows. Test avec 1 laptop + 1 Tessera.

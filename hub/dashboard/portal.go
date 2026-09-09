@@ -780,7 +780,14 @@ func (s *Server) apiRunAction(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 403, "accès refusé")
 		return
 	}
-	res := s.RunAction(r.Context(), a.ID, nil)
+	// Paramètre d'exécution facultatif : la position d'un curseur du tableau de bord.
+	var in struct {
+		Value *float64 `json:"value"`
+	}
+	if r.Body != nil {
+		json.NewDecoder(r.Body).Decode(&in)
+	}
+	res := s.RunActionWith(r.Context(), a.ID, nil, in.Value)
 	log.Printf("[portail] %s lance l'action %q : %s", currentUser(r).Username, a.Name, res)
 	s.logEvent(a.ProjectID, a.DeviceID, "action.run", "info", fmt.Sprintf("%s a lancé « %s » : %s", currentUser(r).Username, a.Name, res))
 	writeJSON(w, map[string]string{"result": res})

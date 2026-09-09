@@ -142,6 +142,37 @@ a.card:hover { border-color: var(--border-2); box-shadow: var(--shadow-md) }
 .widget-tools .icon-btn:hover { background: var(--surface); color: var(--text); border-color: var(--border-2) }
 .widget-tools .icon-btn:last-child:hover { color: var(--danger); border-color: var(--danger) }
 .widget-body { flex: 1; min-height: 0 }
+/* ===== Voyants, jauges, curseurs ===== */
+.led { width: 13px; height: 13px; border-radius: 50%; flex: none; display: inline-block;
+  background: radial-gradient(circle at 35% 30%, #f3f4f6, var(--faint) 60%, #6b7280);
+  box-shadow: inset 0 0 2px rgba(0,0,0,.35) }
+.led.ok { background: radial-gradient(circle at 35% 30%, #86efac, #16a34a 60%, #14532d); box-shadow: 0 0 6px rgba(22,163,74,.55), inset 0 0 2px rgba(0,0,0,.3) }
+.led.warn { background: radial-gradient(circle at 35% 30%, #fde68a, #d97706 60%, #78350f); box-shadow: 0 0 6px rgba(217,119,6,.5), inset 0 0 2px rgba(0,0,0,.3) }
+.led.danger { background: radial-gradient(circle at 35% 30%, #fca5a5, #dc2626 60%, #7f1d1d); box-shadow: 0 0 6px rgba(220,38,38,.5), inset 0 0 2px rgba(0,0,0,.3) }
+.led-list { height: 100%; overflow: auto }
+.led-row { display: grid; grid-template-columns: 13px minmax(0,1fr) auto; gap: 10px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 13px }
+.led-row:last-child { border-bottom: 0 } .led-lbl { overflow-wrap: anywhere } .led-val { font-family: var(--mono); font-size: 12px; color: var(--text-2); white-space: nowrap }
+.led-solo { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; height: 100% }
+.led-solo .led { width: 26px; height: 26px } .led-solo .label { font-size: 12.5px; color: var(--muted); text-align: center }
+
+.gauge { display: flex; flex-direction: column; justify-content: center; gap: 6px; height: 100% }
+.gauge-top { font-size: 24px; font-weight: 600; letter-spacing: -.02em; line-height: 1 }
+.gauge-top .unit { font-size: 14px; font-weight: 500; color: var(--muted); letter-spacing: 0 }
+.gauge-top .warn, .gauge-bar i.warn { color: var(--warn) } .gauge-top .danger, .gauge-bar i.danger { color: var(--danger) }
+.gauge-bar { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden }
+.gauge-bar i { display: block; height: 100%; background: var(--accent); transition: width var(--t) }
+.gauge-bar i.warn { background: var(--warn) } .gauge-bar i.danger { background: var(--danger) }
+.gauge-scale { display: flex; justify-content: space-between; font-size: 11px; color: var(--faint) }
+
+.slider { display: flex; flex-direction: column; justify-content: center; gap: 8px; height: 100% }
+.slider-row { display: grid; grid-template-columns: minmax(0,1fr) 76px; gap: var(--s3); align-items: center }
+.slider input[type=range] { width: 100%; accent-color: var(--accent) }
+.slider-num { height: 30px } .slider-hint { overflow-wrap: anywhere }
+
+.rd-row { display: grid; grid-template-columns: 1.1fr 1fr .7fr 1.3fr 1.3fr .7fr 32px; gap: 6px; align-items: center; margin-bottom: 6px; min-width: 620px }
+.rd-row input, .rd-row select { height: 30px } .rd-row.hdr { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em }
+.scroll-x { overflow-x: auto }
+
 /* ===== Variables ===== */
 .kpi .value .unit { font-size: 15px; font-weight: 500; color: var(--muted); letter-spacing: 0 }
 .var-unknown { color: var(--danger); background: var(--danger-soft); border-radius: 3px; padding: 0 3px; font-family: var(--mono); font-size: .92em }
@@ -211,6 +242,7 @@ a.card:hover { border-color: var(--border-2); box-shadow: var(--shadow-md) }
   .content { padding: var(--s4) } .topbar { padding: 0 var(--s3); gap: var(--s2) } .search { display: none } .page-title p { display: none } .row { grid-template-columns: 1fr } .kv { grid-template-columns: 1fr } .kv dt { margin-top: 6px }
   .device .head { grid-template-columns: auto 1fr auto auto; } .device .head .hide-m { display: none } .tiles { grid-template-columns: 1fr 1fr } .fwd-row, .fwd-row.sub { grid-template-columns: 1fr 1fr; padding-bottom: 8px; border-bottom: 1px solid var(--border) } .fwd-row.hdr { display: none }
   .scan-row { grid-template-columns: 1fr auto; gap: 4px; row-gap: 2px }
+  .rd-row { min-width: 560px }
   .sub-stat { grid-template-columns: 10px 1fr 1fr; row-gap: 2px } .sub-stat.hdr { display: none } .device .foot { flex-direction: column; align-items: stretch }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important } }

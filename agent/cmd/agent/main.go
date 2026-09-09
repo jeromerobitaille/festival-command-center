@@ -28,6 +28,7 @@ import (
 	"github.com/festival/command-center/agent/internal/localapi"
 	"github.com/festival/command-center/agent/internal/portal"
 	"github.com/festival/command-center/agent/internal/probe"
+	"github.com/festival/command-center/agent/internal/reading"
 	"github.com/festival/command-center/agent/internal/scan"
 	"github.com/festival/command-center/agent/internal/status"
 	"github.com/festival/command-center/agent/internal/sysinfo"
@@ -620,6 +621,11 @@ func (a *agentState) buildHeartbeat(ctx context.Context, rdID string) heartbeat.
 		}
 		r := probe.TCP(ctx, sd.IP, sd.Port)
 		r.Name = sd.Name
+		// Les sondes ne sont tentées que si l'équipement répond : sinon chacune
+		// attendrait son propre délai et retarderait le heartbeat d'autant.
+		if r.Reachable && len(sd.Readings) > 0 {
+			r.Readings = readAll(ctx, sd)
+		}
 		subs = append(subs, r)
 		st = append(st, status.SubDev{Name: sd.Name, Target: r.Target, Reachable: r.Reachable, RTTMS: r.RTTMS})
 	}
@@ -635,6 +641,30 @@ func (a *agentState) buildHeartbeat(ctx context.Context, rdID string) heartbeat.
 	}
 	p.System = sysinfo.Collect(ctx)
 	return p
+}
+
+// readAll interroge les sondes d'un sous-appareil en parallèle.
+func readAll(ctx context.Context, sd portal.SubDeviceConf) []reading.Result {
+	out := make([]reading.Result, len(sd.Readings))
+	var wg sync.WaitGroup
+	for i, c := range sd.Readings {
+		if c.Name == "" {
+			continue
+		}
+		wg.Add(1)
+		go func(i int, c reading.Conf) {
+			defer wg.Done()
+			out[i] = reading.Read(ctx, sd.IP, sd.Port, c)
+		}(i, c)
+	}
+	wg.Wait()
+	res := out[:0]
+	for _, r := range out {
+		if r.Name != "" {
+			res = append(res, r)
+		}
+	}
+	return res
 }
 
 // runCommand exécute une commande du portail et remonte le résultat.

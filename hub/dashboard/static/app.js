@@ -27,17 +27,17 @@ function renderIcons(root = document) { root.querySelectorAll('i[data-icon]').fo
 
 /* ---------- Noyau : API, toast, modal, menus ---------- */
 const App = {
-  async api(method, url, body) {
+  async api(method, url, body, quiet) {
     const opt = { method, headers: {} };
     if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
     opt.signal = AbortSignal.timeout(30000);
     let r;
     try { r = await fetch(url, opt); }
-    catch (e) { const m = e.name === 'TimeoutError' ? 'Le serveur ne répond pas (30 s)' : 'Requête impossible : ' + e.message; App.toast(m, true); throw new Error(m); }
+    catch (e) { const m = e.name === 'TimeoutError' ? 'Le serveur ne répond pas (30 s)' : 'Requête impossible : ' + e.message; if (!quiet) App.toast(m, true); throw new Error(m); }
     if (r.status === 401) { location.href = '/login?next=' + encodeURIComponent(location.pathname); throw new Error('session expirée'); }
     const text = await r.text();
     let data = null; try { data = text ? JSON.parse(text) : null; } catch { data = text; }
-    if (!r.ok) { const msg = (data && data.error) || r.statusText; App.toast(msg, true); throw new Error(msg); }
+    if (!r.ok) { const msg = (data && data.error) || r.statusText; if (!quiet) App.toast(msg, true); throw new Error(msg); }
     return data;
   },
   toast(msg, err) { const t = document.getElementById('toast'); t.textContent = msg; t.className = 'toast' + (err ? ' err' : ''); t.hidden = false; clearTimeout(App._t); App._t = setTimeout(() => t.hidden = true, err ? 6000 : 2800); },
@@ -102,7 +102,7 @@ const App = {
   async pollBadges() {
     try {
       const key = 'fcc.seen.' + PROJECT.id; const seen = +(localStorage.getItem(key) || 0);
-      const [ev, devs] = await Promise.all([App.api('GET', `/api/projects/${PROJECT.id}/events?after=${seen}&limit=100`), App.api('GET', `/api/projects/${PROJECT.id}/devices`)]);
+      const [ev, devs] = await Promise.all([App.api('GET', `/api/projects/${PROJECT.id}/events?after=${seen}&limit=100`, undefined, true), App.api('GET', `/api/projects/${PROJECT.id}/devices`, undefined, true)]);
       const unread = ev.length, pending = devs.filter(d => d.status === 'pending').length;
       const nb = document.getElementById('nav-unread'), bb = document.getElementById('bell-badge'), np = document.getElementById('nav-pending');
       if (nb) { nb.hidden = !unread; nb.textContent = unread > 99 ? '99+' : unread; } if (bb) bb.hidden = !unread;
@@ -181,6 +181,14 @@ const Vars = {
       last = m.index + m[0].length;
     }
     return out + App.esc(src.slice(last));
+  },
+  // Si aucune variable de l'expression n'a de valeur, le texte statique restant (une unité,
+  // le plus souvent) n'a pas de sens seul : on affiche un tiret.
+  resolveOrDash(text) {
+    const src = String(text ?? ''); Vars.re.lastIndex = 0;
+    const stripped = src.replace(Vars.re, '').trim();
+    if (stripped === src.trim()) return Vars.resolveHTML(src);
+    return Vars.resolve(src).trim() === stripped ? '<span class="muted">—</span>' : Vars.resolveHTML(src);
   },
   btn(targetId) { return `<button type="button" class="btn ghost small vp-btn" onclick="Vars.picker(this, '${targetId}')"><i data-icon="braces"></i>Variables</button>`; },
   insert(target, txt) {
@@ -288,7 +296,49 @@ const Dash = {
     const title = w.title || Dash.defaultTitle(w);
     return `<div class="widget-head">${title ? `<h3 data-wtitle="${w.id}">${Vars.resolveHTML(title)}</h3>` : ''}${tools}</div><div class="widget-body" data-wid="${w.id}"><div class="skeleton"></div></div>`;
   },
-  defaultTitle(w) { return { screens: 'Appareils', screen: 'Appareil', button: '', kpi: '', value: '', automations: 'Automatisations', events: 'Dernières notifications', note: '' }[w.type] ?? w.type; },
+  // Une condition est une comparaison de chaînes : la valeur résolue vaut « ok » (vert),
+  // « warn » (ambre), rien (gris, donnée absente) ou autre chose (rouge).
+  ledState(expr, ok, warn) {
+    const v = Vars.resolve(expr || '').trim();
+    if (!v) return 'off';
+    if (v === (ok || 'oui').trim()) return 'ok';
+    if (warn && v === warn.trim()) return 'warn';
+    return 'danger';
+  },
+  // Une ligne par voyant : « Libellé | condition | valeur ».
+  parseRows(text) {
+    return String(text || '').split('\n').map(l => l.trim()).filter(Boolean)
+      .map(l => { const p = l.split('|').map(x => x.trim()); return [p[0] || '', p[1] || '', p[2] || '']; });
+  },
+  gaugeLevel(v, w) {
+    const d = w.danger === '' || w.danger == null ? null : Number(w.danger);
+    const a = w.warn_at === '' || w.warn_at == null ? null : Number(w.warn_at);
+    const rising = Number(w.max ?? 100) >= Number(w.min ?? 0);
+    if (d != null && (rising ? v >= d : v <= d)) return 'danger';
+    if (a != null && (rising ? v >= a : v <= a)) return 'warn';
+    return '';
+  },
+  fmt(v) { return Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100); },
+  // Position affichée : la dernière envoyée si on en a une, sinon la variable de retour.
+  sliderValue(w, min) {
+    if (Dash.sent[w.id] != null) return Dash.sent[w.id];
+    const v = parseFloat(String(Vars.resolve(w.feedback || '')).replace(',', '.'));
+    return isFinite(v) ? v : min;
+  },
+  sent: {},
+  sliderEcho(id, v) { const el = document.querySelector(`.slider[data-wid="${id}"] .slider-num`); if (el) el.value = v; },
+  async sliderSend(id, actionId, value, echo) {
+    const v = Number(value); if (!isFinite(v)) return;
+    Dash.sent[id] = v;
+    if (echo) { const r = document.querySelector(`.slider[data-wid="${id}"] input[type=range]`); if (r) r.value = v; }
+    const hint = document.getElementById('sl-' + id); const before = hint ? hint.textContent : '';
+    if (hint) hint.textContent = 'envoi…';
+    try {
+      const r = await App.api('POST', `/api/actions/${actionId}/run`, { value: v });
+      if (hint) hint.textContent = r && r.result ? r.result : before;
+    } catch { if (hint) hint.textContent = before; }
+  },
+  defaultTitle(w) { return { screens: 'Appareils', screen: 'Appareil', button: '', kpi: '', value: '', led: '', leds: 'États', gauge: '', slider: '', automations: 'Automatisations', events: 'Dernières notifications', note: '' }[w.type] ?? w.type; },
   async refresh() {
     try { const [ov, ev] = await Promise.all([App.api('GET', `/api/projects/${PROJECT.id}/overview`), App.api('GET', `/api/projects/${PROJECT.id}/events?limit=8`), Vars.load()]); Dash.data = ov; Dash.data.events = ev; } catch { return; }
     Dash.fill();
@@ -313,8 +363,42 @@ const Dash = {
       case 'automations': return D.automations.length ? `<table class="table" style="font-size:13px">${D.automations.map(a => `<tr><td style="padding:6px 0"><span class="dot ${a.enabled ? 'ok' : ''}"></span>${App.esc(a.name)}</td><td class="muted" style="padding:6px 8px">${App.esc(a.action_name)}</td><td class="muted small" style="padding:6px 0;text-align:right">${a.enabled ? App.esc(a.next_run) : 'désactivée'}</td></tr>`).join('')}</table>` : '<span class="muted">Aucune automatisation.</span>';
       case 'events': return D.events.length ? `<div class="event-list">${D.events.map(UI.eventRow).join('')}</div>` : '<span class="muted">Aucune notification.</span>';
       case 'note': return `<div>${Vars.resolveHTML(w.text || '').replace(/\n/g, '<br>')}</div>`;
+      case 'led': {
+        const st = Dash.ledState(w.expr, w.ok, w.warn);
+        return `<div class="led-solo"><span class="led ${st}"></span><div class="label">${Vars.resolveHTML(w.label || '')}</div></div>`;
+      }
+      case 'leds': {
+        const rows = Dash.parseRows(w.rows).map(r => {
+          const st = Dash.ledState(r[1], w.ok, w.warn);
+          return `<div class="led-row"><span class="led ${st}"></span><span class="led-lbl">${Vars.resolveHTML(r[0])}</span><span class="led-val">${r[2] ? Vars.resolveOrDash(r[2]) : ''}</span></div>`;
+        }).join('');
+        return rows ? `<div class="led-list">${rows}</div>` : '<span class="muted">Aucune ligne. Modifiez le widget pour en ajouter.</span>';
+      }
+      case 'gauge': {
+        const raw = Vars.resolve(w.expr || '');
+        const v = parseFloat(String(raw).replace(',', '.'));
+        const min = Number(w.min ?? 0), max = Number(w.max ?? 100);
+        if (!isFinite(v)) return `<div class="gauge"><div class="gauge-top"><span class="muted">—</span></div><div class="gauge-bar"><i style="width:0"></i></div><div class="muted small">${raw ? 'valeur non numérique : ' + App.esc(raw) : 'aucune valeur'}</div></div>`;
+        const pct = max > min ? Math.max(0, Math.min(100, (v - min) * 100 / (max - min))) : 0;
+        const lvl = Dash.gaugeLevel(v, w);
+        return `<div class="gauge"><div class="gauge-top"><b class="${lvl}">${App.esc(Dash.fmt(v))}</b>${w.unit ? ` <span class="unit">${App.esc(w.unit)}</span>` : ''}</div>
+          <div class="gauge-bar"><i class="${lvl}" style="width:${pct.toFixed(1)}%"></i></div>
+          <div class="gauge-scale"><span>${App.esc(Dash.fmt(min))}</span><span>${App.esc(Dash.fmt(max))}</span></div></div>`;
+      }
+      case 'slider': {
+        const a = D.actions.find(x => x.id == w.action_id);
+        if (!a) return '<span class="muted">Action introuvable.</span>';
+        const min = Number(w.min ?? 0), max = Number(w.max ?? 100), step = Number(w.step) || 1;
+        const cur = Dash.sliderValue(w, min);
+        return `<div class="slider" data-wid="${w.id}">
+          <div class="slider-row"><input type="range" min="${min}" max="${max}" step="${step}" value="${cur}"
+            oninput="Dash.sliderEcho('${w.id}',this.value)" onchange="Dash.sliderSend('${w.id}',${a.id},this.value)">
+            <input type="number" class="slider-num" min="${min}" max="${max}" step="${step}" value="${cur}"
+              onchange="Dash.sliderSend('${w.id}',${a.id},this.value,true)"></div>
+          <div class="muted small slider-hint" id="sl-${w.id}">${w.unit ? App.esc(w.unit) + ' · ' : ''}${App.esc(a.name)}</div></div>`;
+      }
       case 'value': {
-        const v = Vars.resolveHTML(w.expr || '');
+        const v = Vars.resolveOrDash(w.expr || '');
         return `<div class="kpi"><div class="value">${v || '<span class="muted">—</span>'}${w.unit ? ` <span class="unit">${App.esc(w.unit)}</span>` : ''}</div>${w.label ? `<div class="label">${Vars.resolveHTML(w.label)}</div>` : ''}</div>`;
       }
     }
@@ -335,7 +419,7 @@ const Dash = {
     const w = id ? Dash.widgets.find(x => x.id === id) : null;
     const t = w ? w.type : 'kpi';
     const sel = (v, cur) => v === cur ? 'selected' : '';
-    const types = { kpi: 'Indicateur', screens: 'État de tous les appareils', screen: "Détail d'un appareil", button: "Bouton d'action", events: 'Dernières notifications', automations: 'Automatisations', value: 'Valeur (variable)', note: 'Note' };
+    const types = { kpi: 'Indicateur', screens: 'État de tous les appareils', screen: "Détail d'un appareil", button: "Bouton d'action", events: 'Dernières notifications', automations: 'Automatisations', value: 'Valeur (variable)', leds: 'Liste de voyants', led: 'Voyant', gauge: 'Jauge', slider: 'Curseur', note: 'Note' };
     App.modal(`<h2>${w ? 'Modifier le widget' : 'Ajouter un widget'}</h2>
       <label class="field"><span>Type</span><select id="w-type" onchange="Dash.onType()">${Object.entries(types).map(([k, lbl]) => `<option value="${k}" ${sel(k, t)}>${lbl}</option>`).join('')}</select></label>
       <label class="field" id="w-metric-l"><span>Indicateur</span><select id="w-metric">${[['online', 'Appareils en ligne'], ['subko', 'Sous-appareils injoignables'], ['pending', "En attente d'approbation"], ['relayed', 'Appareils relayés']].map(([k, lbl]) => `<option value="${k}" ${sel(k, w && w.metric)}>${lbl}</option>`).join('')}</select></label>
@@ -345,14 +429,31 @@ const Dash = {
       <label class="field" id="w-text-l" hidden><span>Texte <span class="faint">· {{ variables }} acceptées</span></span><textarea id="w-text">${App.esc(w && w.text || '')}</textarea>${Vars.btn('w-text')}</label>
       <label class="field" id="w-expr-l" hidden><span>Valeur <span class="faint">· une ou plusieurs variables</span></span><input id="w-expr" value="${App.esc(w && w.expr || '')}" placeholder="{{ ecran_01.cpu }}">${Vars.btn('w-expr')}</label>
       <div class="row" id="w-vrow" hidden><label class="field"><span>Unité (optionnel)</span><input id="w-unit" value="${App.esc(w && w.unit || '')}" placeholder="%"></label><label class="field"><span>Légende (optionnel)</span><input id="w-label" value="${App.esc(w && w.label || '')}" placeholder="CPU régie"></label></div>
+      <label class="field" id="w-rows-l" hidden><span>Lignes <span class="faint">· une par voyant : <code>Libellé | condition | valeur</code></span></span><textarea id="w-rows" rows="6" placeholder="Cabane 1 | {{ ecran_01.subs.cabane_1.reachable }} | {{ ecran_01.subs.cabane_1.readings.nits }} nits">${App.esc(w && w.rows || '')}</textarea>${Vars.btn('w-rows')}</label>
+      <label class="field" id="w-cond-l" hidden><span>Condition <span class="faint">· variable à surveiller</span></span><input id="w-cond" value="${App.esc(w && w.expr || '')}" placeholder="{{ ecran_01.subs.cabane_1.reachable }}">${Vars.btn('w-cond')}</label>
+      <div class="row" id="w-okrow" hidden><label class="field"><span>Vert si la valeur est</span><input id="w-ok" value="${App.esc(w && w.ok || '')}" placeholder="oui"></label><label class="field"><span>Ambre si la valeur est (optionnel)</span><input id="w-warn" value="${App.esc(w && w.warn || '')}"></label></div>
+      <label class="field" id="w-gexpr-l" hidden><span>Valeur mesurée</span><input id="w-gexpr" value="${App.esc(w && w.expr || '')}" placeholder="{{ ecran_01.cpu }}">${Vars.btn('w-gexpr')}</label>
+      <label class="field" id="w-act2-l" hidden><span>Action <span class="faint">· doit contenir <code>{{ value }}</code></span></span><select id="w-act2">${D.actions.filter(a => a.needs_value).map(a => `<option value="${a.id}" ${w && w.action_id === a.id ? 'selected' : ''}>${App.esc(a.name)}</option>`).join('') || '<option value="">aucune action paramétrée</option>'}</select></label>
+      <label class="field" id="w-fb-l" hidden><span>Position lue (optionnel) <span class="faint">· variable de retour de l'équipement</span></span><input id="w-fb" value="${App.esc(w && w.feedback || '')}" placeholder="{{ ecran_01.subs.cabane_1.readings.nits }}">${Vars.btn('w-fb')}</label>
+      <div class="row" id="w-range" hidden><label class="field"><span>Minimum</span><input id="w-min" type="number" value="${w && w.min != null ? w.min : 0}"></label><label class="field"><span>Maximum</span><input id="w-max" type="number" value="${w && w.max != null ? w.max : 100}"></label><label class="field" id="w-step-l"><span>Pas</span><input id="w-step" type="number" value="${w && w.step != null ? w.step : 1}"></label></div>
+      <div class="row" id="w-thr" hidden><label class="field"><span>Ambre à partir de (optionnel)</span><input id="w-warnat" type="number" value="${w && w.warn_at != null ? w.warn_at : ''}"></label><label class="field"><span>Rouge à partir de (optionnel)</span><input id="w-danger" type="number" value="${w && w.danger != null ? w.danger : ''}"></label></div>
       <div class="modal-foot"><button class="btn" onclick="App.closeModal()">Annuler</button><button class="btn primary" onclick="Dash.confirmWidget(${w ? `'${w.id}'` : 'null'})">${w ? 'Enregistrer' : 'Ajouter'}</button></div>`);
     Dash.onType();
   },
-  onType() { const t = App.val('w-type'); const h = (id, on) => document.getElementById(id).hidden = !on; h('w-metric-l', t === 'kpi'); h('w-dev-l', t === 'screen'); h('w-act-l', t === 'button'); h('w-text-l', t === 'note'); h('w-expr-l', t === 'value'); h('w-vrow', t === 'value'); },
+  onType() {
+    const t = App.val('w-type'); const h = (id, on) => document.getElementById(id).hidden = !on;
+    h('w-metric-l', t === 'kpi'); h('w-dev-l', t === 'screen'); h('w-act-l', t === 'button');
+    h('w-text-l', t === 'note'); h('w-expr-l', t === 'value');
+    h('w-vrow', t === 'value' || t === 'gauge' || t === 'slider' || t === 'led');
+    h('w-rows-l', t === 'leds'); h('w-cond-l', t === 'led');
+    h('w-okrow', t === 'led' || t === 'leds');
+    h('w-gexpr-l', t === 'gauge'); h('w-act2-l', t === 'slider'); h('w-fb-l', t === 'slider');
+    h('w-range', t === 'gauge' || t === 'slider'); h('w-step-l', t === 'slider'); h('w-thr', t === 'gauge');
+  },
   confirmWidget(id) {
     const t = App.val('w-type');
     const cur = id ? Dash.widgets.find(x => x.id === id) : null;
-    const size = { kpi: [3, 2], screens: [8, 4], screen: [5, 5], button: [3, 2], events: [4, 5], automations: [5, 3], note: [4, 2], value: [3, 2] }[t];
+    const size = { kpi: [3, 2], screens: [8, 4], screen: [5, 5], button: [3, 2], events: [4, 5], automations: [5, 3], note: [4, 2], value: [3, 2], led: [2, 2], leds: [4, 5], gauge: [3, 2], slider: [4, 2] }[t];
     // Objet reconstruit à neuf : un changement de type ne doit pas laisser traîner les champs de l'ancien.
     const w = { id: cur ? cur.id : 'w' + Date.now().toString(36), type: t, title: App.val('w-title') };
     if (cur) Object.assign(w, { x: cur.x, y: cur.y, w: cur.w, h: cur.h });
@@ -362,6 +463,22 @@ const Dash = {
     if (t === 'button') w.action_id = +App.val('w-act');
     if (t === 'note') w.text = App.val('w-text');
     if (t === 'value') { w.expr = App.val('w-expr'); w.unit = App.val('w-unit'); w.label = App.val('w-label'); if (!w.expr.trim()) { App.toast('Indiquez au moins une variable', true); return; } }
+    if (t === 'led') { w.expr = App.val('w-cond'); w.ok = App.val('w-ok'); w.warn = App.val('w-warn'); w.label = App.val('w-label'); if (!w.expr.trim()) { App.toast('Indiquez la variable à surveiller', true); return; } }
+    if (t === 'leds') { w.rows = App.val('w-rows'); w.ok = App.val('w-ok'); w.warn = App.val('w-warn'); if (!Dash.parseRows(w.rows).length) { App.toast('Ajoutez au moins une ligne', true); return; } }
+    if (t === 'gauge') {
+      w.expr = App.val('w-gexpr'); w.unit = App.val('w-unit'); w.label = App.val('w-label');
+      w.min = +App.val('w-min'); w.max = +App.val('w-max');
+      w.warn_at = App.val('w-warnat') === '' ? null : +App.val('w-warnat');
+      w.danger = App.val('w-danger') === '' ? null : +App.val('w-danger');
+      if (!w.expr.trim()) { App.toast('Indiquez la variable à mesurer', true); return; }
+      if (w.min === w.max) { App.toast('Minimum et maximum doivent différer', true); return; }
+    }
+    if (t === 'slider') {
+      w.action_id = +App.val('w-act2'); w.unit = App.val('w-unit'); w.label = App.val('w-label'); w.feedback = App.val('w-fb');
+      w.min = +App.val('w-min'); w.max = +App.val('w-max'); w.step = +App.val('w-step') || 1;
+      if (!w.action_id) { App.toast('Aucune action ne contient {{ value }} : créez-en une d’abord', true); return; }
+      if (w.min >= w.max) { App.toast('Le maximum doit être supérieur au minimum', true); return; }
+    }
     if ((t === 'screen' && !w.device_id) || (t === 'button' && !w.action_id)) { App.toast('Aucun élément disponible pour ce type', true); return; }
     App.closeModal();
     if (cur) {
@@ -539,10 +656,37 @@ const Devices = {
         <div class="fwds">${(c.forwards || []).filter(f => !f.sub).map(f => Devices.fwdRow(f, ro)).join('')}</div>
         ${ro ? '' : `<button class="btn ghost small" onclick="Devices.addFwd(${d.id})"><i data-icon="plus"></i>Forward</button>`}
       </details>
+      <details class="details" ${(c.sub_devices || []).some(sd => (sd.readings || []).length) ? 'open' : ''}><summary>Sondes de lecture (avancé)</summary>
+        <p class="muted small" style="margin-bottom:8px">L'agent interroge l'équipement à chaque heartbeat et remonte la valeur. Extraction : chemin JSON pointé (<code>data.brightness</code>), ou expression régulière entre barres obliques (<code>/nits=(\d+)/</code>). Vide = corps entier.</p>
+        <div class="scroll-x"><div class="rd-row hdr"><span>sous-appareil</span><span>nom</span><span>méthode</span><span>chemin</span><span>extraction</span><span>unité</span><span></span></div>
+        <div class="rds">${(c.sub_devices || []).flatMap(sd => (sd.readings || []).map(rd => Devices.rdRow(sd.name, rd, ro, c.sub_devices))).join('')}</div></div>
+        ${ro ? '' : `<button class="btn ghost small" onclick="Devices.addReading(${d.id})"><i data-icon="plus"></i>Sonde</button>`}
+      </details>
       <h3>Mises à jour</h3>
       <div class="row"><label class="check"><input type="checkbox" class="c-upd" ${c.update && c.update.enabled ? 'checked' : ''} ${dis}> Mise à jour automatique</label><label class="field"><span>Vérification (heures)</span><input class="c-updh" type="number" value="${c.update && c.update.check_hours || 1}" ${dis}></label></div>
       ${ro ? '' : `<div class="btnrow save"><button class="btn primary" onclick="Devices.saveConfig(${d.id})">Enregistrer et appliquer</button>
         <span class="muted small save-hint">appliqué au prochain heartbeat</span><span class="small dirty-flag">modifications non enregistrées</span></div>`}`;
+  },
+  // Une sonde est rattachée à un sous-appareil par son nom : la liste est plate, plus
+  // lisible qu'un éditeur imbriqué dans chaque ligne de sous-appareil.
+  rdRow(subName, rd, ro, subs) {
+    const dis = ro ? 'disabled' : '';
+    const extract = rd.regex ? '/' + rd.regex + '/' : (rd.json || '');
+    const opts = (subs || []).filter(x => x.name).map(x => `<option ${x.name === subName ? 'selected' : ''}>${App.esc(x.name)}</option>`).join('');
+    return `<div class="rd-row"><select class="rd-sub" ${dis}>${opts}</select>
+      <input class="rd-name" value="${App.esc(rd.name || '')}" placeholder="nits" ${dis}>
+      <select class="rd-method" ${dis}>${['GET', 'POST'].map(m => `<option ${(rd.method || 'GET') === m ? 'selected' : ''}>${m}</option>`).join('')}</select>
+      <input class="rd-path" value="${App.esc(rd.path || '')}" placeholder="/api/brightness" ${dis}>
+      <input class="rd-extract" value="${App.esc(extract)}" placeholder="data.brightness" ${dis}>
+      <input class="rd-unit" value="${App.esc(rd.unit || '')}" placeholder="nits" ${dis}>
+      ${ro ? '<span></span>' : '<button class="icon-btn" onclick="this.parentNode.remove()" aria-label="Retirer"><i data-icon="x"></i></button>'}</div>`;
+  },
+  addReading(id) {
+    const card = Devices.cardEl(id); const h = card.querySelector('.rds');
+    const subs = [...card.querySelectorAll('.subs .fwd-row.sub:not(.hdr) .s-name')].map(i => ({ name: i.value })).filter(x => x.name);
+    if (!subs.length) { App.toast('Déclarez d’abord un sous-appareil', true); return; }
+    h.insertAdjacentHTML('beforeend', Devices.rdRow(subs[0].name, {}, false, subs));
+    renderIcons(h); Devices.markDirty(id); h.lastElementChild.querySelector('.rd-name').focus();
   },
   subRow(sd, ro, ip) {
     const dis = ro ? 'disabled' : '';
@@ -563,6 +707,15 @@ const Devices = {
       name: r.querySelector('.s-name').value.trim(), ip: r.querySelector('.s-ip').value.trim(), port: +r.querySelector('.s-port').value,
       expose: r.querySelector('.s-expose').checked, listen: +r.querySelector('.s-listen').value || 0,
     })).filter(sd => sd.ip);
+    // Les sondes sont saisies à plat puis réparties dans leur sous-appareil.
+    for (const r of card.querySelectorAll('.rds .rd-row:not(.hdr)')) {
+      const name = r.querySelector('.rd-name').value.trim(); if (!name) continue;
+      const target = sub_devices.find(x => x.name === r.querySelector('.rd-sub').value); if (!target) continue;
+      const ex = r.querySelector('.rd-extract').value.trim();
+      const rd = { name, method: r.querySelector('.rd-method').value, path: r.querySelector('.rd-path').value.trim(), unit: r.querySelector('.rd-unit').value.trim() };
+      if (ex.length > 1 && ex[0] === '/' && ex[ex.length - 1] === '/') rd.regex = ex.slice(1, -1); else if (ex) rd.json = ex;
+      (target.readings = target.readings || []).push(rd);
+    }
     const forwards = [...card.querySelectorAll('.fwds .fwd-row:not(.hdr)')].map(r => ({ name: r.querySelector('.f-name').value.trim(), proto: r.querySelector('.f-proto').value, listen: +r.querySelector('.f-listen').value, target: r.querySelector('.f-target').value.trim() }));
     await App.api('PUT', `/api/devices/${id}/config`, { name: v('.c-name'), heartbeat_seconds: +v('.c-hb'), sub_devices, forwards, update: { enabled: card.querySelector('.c-upd').checked, check_hours: +v('.c-updh') } });
     Devices.dirty.delete(id);

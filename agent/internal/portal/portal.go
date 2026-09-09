@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/festival/command-center/agent/internal/reading"
 	"io"
 	"net/http"
 	"os"
@@ -52,7 +53,9 @@ func (c *Client) do(ctx context.Context, method, path string, in, out any) error
 		return ErrUnauthorized
 	}
 	if resp.StatusCode/100 != 2 {
-		var e struct{ Error string `json:"error"` }
+		var e struct {
+			Error string `json:"error"`
+		}
 		json.NewDecoder(resp.Body).Decode(&e)
 		return fmt.Errorf("portail %s %s : %s %s", method, path, resp.Status, e.Error)
 	}
@@ -75,6 +78,8 @@ type SubDeviceConf struct {
 	Name string `json:"name"`
 	IP   string `json:"ip"`
 	Port int    `json:"port"`
+	// Sondes de lecture : interrogées à chaque heartbeat, leur valeur remonte au portail.
+	Readings []reading.Conf `json:"readings,omitempty"`
 }
 type ForwardConf struct {
 	Name   string `json:"name"`
@@ -132,7 +137,9 @@ func (c *Client) Status(ctx context.Context) (*Status, error) {
 	return &s, c.do(ctx, "GET", "/status", nil, &s)
 }
 
-func (c *Client) AckKey(ctx context.Context) error { return c.do(ctx, "POST", "/ack-key", struct{}{}, nil) }
+func (c *Client) AckKey(ctx context.Context) error {
+	return c.do(ctx, "POST", "/ack-key", struct{}{}, nil)
+}
 
 func (c *Client) Config(ctx context.Context) (int64, *DeviceConfig, error) {
 	var res struct {

@@ -4,6 +4,7 @@ package probe
 import (
 	"context"
 	"fmt"
+	"github.com/festival/command-center/agent/internal/reading"
 	"net"
 	"time"
 )
@@ -14,6 +15,8 @@ type Result struct {
 	Reachable bool    `json:"reachable"`
 	RTTMS     float64 `json:"rtt_ms"`
 	Error     string  `json:"error,omitempty"`
+	// Valeurs lues sur l'équipement, si des sondes sont configurées.
+	Readings []reading.Result `json:"readings,omitempty"`
 }
 
 // TCP tente une connexion TCP et mesure le temps de handshake.

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -43,6 +44,12 @@ type hbVars struct {
 		Reachable bool    `json:"reachable"`
 		RTTMs     float64 `json:"rtt_ms"`
 		Error     string  `json:"error"`
+		Readings  []struct {
+			Name  string `json:"name"`
+			Value string `json:"value"`
+			Unit  string `json:"unit"`
+			Error string `json:"error"`
+		} `json:"readings"`
 	} `json:"sub_devices"`
 	Peers []struct {
 		Hostname  string  `json:"hostname"`
@@ -187,6 +194,21 @@ func buildVariables(p *Project, devices []*Device) []Variable {
 				}
 			}
 			add(sg, base+".access", "Accès réseau privé", access)
+			// Valeurs lues sur l'équipement : une sonde en échec donne une variable vide
+			// plutôt qu'un message d'erreur, qui n'a rien à faire dans un tableau de bord.
+			for _, rd := range sd.Readings {
+				rk := varKey(rd.Name)
+				if rk == "" {
+					continue
+				}
+				label := rd.Name
+				if rd.Unit != "" {
+					label += " (" + rd.Unit + ")"
+				}
+				add(sg, base+".readings."+rk, label, rd.Value)
+				add(sg, base+".readings."+rk+".unit", rd.Name+" — unité", rd.Unit)
+				add(sg, base+".readings."+rk+".error", rd.Name+" — erreur", rd.Error)
+			}
 		}
 	}
 
@@ -276,12 +298,19 @@ func (s *Server) projectVars(projectID int64) ([]Variable, error) {
 // resolveAction substitue les variables dans l'URL, les en-têtes et le corps.
 // Renvoie une erreur si une variable est inconnue, ou si l'URL résolue n'est plus exploitable :
 // une valeur remontée par un agent ne doit pas pouvoir détourner la requête du hub.
-func (s *Server) resolveAction(a *Action) (string, map[string]string, string, error) {
+// value, s'il est fourni, alimente {{ value }} : c'est le paramètre d'exécution transmis
+// par un widget curseur. Volontairement restreint à un nombre — la valeur vient du
+// navigateur d'un utilisateur qui n'est pas forcément administrateur, et elle est injectée
+// dans une URL et un corps de requête. Un nombre ne peut pas les détourner.
+func (s *Server) resolveAction(a *Action, value *float64) (string, map[string]string, string, error) {
 	list, err := s.projectVars(a.ProjectID)
 	if err != nil {
 		return "", nil, "", fmt.Errorf("variables indisponibles : %w", err)
 	}
 	vars := varsMap(list)
+	if value != nil {
+		vars["value"] = formatNumber(*value)
+	}
 	var missing []string
 	collect := func(s string) string {
 		out, m := resolveVars(s, vars)
@@ -329,4 +358,31 @@ func parseAndCheck(raw string) (string, error) {
 		return "", fmt.Errorf("URL sans hôte après substitution : %s", raw)
 	}
 	return raw, nil
+}
+
+// formatNumber rend un entier sans décimale : un équipement qui attend 60 n'accepte pas
+// toujours 60.0.
+func formatNumber(f float64) string {
+	if f == float64(int64(f)) {
+		return strconv.FormatInt(int64(f), 10)
+	}
+	return strconv.FormatFloat(f, 'f', -1, 64)
+}
+
+// ActionNeedsValue indique si l'action référence {{ value }}, donc attend un paramètre
+// d'exécution. Sert au portail à ne proposer que ces actions à un widget curseur.
+func ActionNeedsValue(a *Action) bool {
+	for _, m := range varRe.FindAllStringSubmatch(a.URL+"\n"+a.Body, -1) {
+		if m[1] == "value" {
+			return true
+		}
+	}
+	for _, v := range a.Headers {
+		for _, m := range varRe.FindAllStringSubmatch(v, -1) {
+			if m[1] == "value" {
+				return true
+			}
+		}
+	}
+	return false
 }
